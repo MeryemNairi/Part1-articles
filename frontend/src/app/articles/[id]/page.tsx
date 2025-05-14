@@ -35,6 +35,7 @@ export default function ArticleDetailPage() {
   const [activeTab, setActiveTab] = useState("content")
   const [currentLanguage, setCurrentLanguage] = useState("fr")
   const [isTranslating, setIsTranslating] = useState(false)
+  const [sources, setSources] = useState<string[]>([])
   
   const articleContentRef = useRef<HTMLDivElement>(null)
 
@@ -69,6 +70,11 @@ export default function ArticleDetailPage() {
       setTitle(sessionData.titles[articleIndex])
       setContent(sessionData.articles[articleIndex].content)
       setEditedContent(sessionData.articles[articleIndex].content)
+      
+      // Récupérer les sources si elles existent
+      if (sessionData.articles[articleIndex].sources) {
+        setSources(sessionData.articles[articleIndex].sources)
+      }
       
       // Générer un prompt pour l'image basé sur le titre
       setImagePrompt(`Illustration pour un article intitulé "${sessionData.titles[articleIndex]}" sur le sujet ${sessionData.topic}`)
@@ -218,9 +224,18 @@ export default function ArticleDetailPage() {
       setContent(data.content)
       setEditedContent(data.content)
       
+      // Mettre à jour les sources si elles existent
+      if (data.sources && Array.isArray(data.sources)) {
+        setSources(data.sources)
+      }
+      
       // Mettre à jour dans la session
       if (sessionData.articles && sessionData.articles[id]) {
         sessionData.articles[id].content = data.content
+        // Sauvegarder également les sources
+        if (data.sources) {
+          sessionData.articles[id].sources = data.sources
+        }
         localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData))
       }
     } catch (err) {
@@ -425,9 +440,10 @@ export default function ArticleDetailPage() {
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <div className="px-6 pt-6">
-              <TabsList className="grid grid-cols-2 mb-6">
+              <TabsList className="grid grid-cols-3 mb-6">
                 <TabsTrigger value="content">Contenu</TabsTrigger>
                 <TabsTrigger value="preview">Aperçu</TabsTrigger>
+                <TabsTrigger value="resources">Ressources</TabsTrigger>
               </TabsList>
             </div>
 
@@ -550,6 +566,40 @@ export default function ArticleDetailPage() {
 
                   <div className="prose dark:prose-invert max-w-none">
                     <ReactMarkdown>{content}</ReactMarkdown>
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="resources" className="mt-0">
+                <div className="space-y-6">
+                  <h3 className="text-xl font-semibold mb-4">Sources et Ressources</h3>
+                  
+                  {sources && sources.length > 0 ? (
+                    <div className="grid gap-4">
+                      {sources.map((source, index) => (
+                        <Card key={index} className="overflow-hidden">
+                          <CardHeader className="p-4 bg-slate-50 dark:bg-slate-800">
+                            <h4 className="font-medium">Source {index + 1}</h4>
+                          </CardHeader>
+                          <CardContent className="p-4">
+                            <p className="text-sm break-words">{source}</p>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-6 text-center">
+                      <p className="text-slate-500 dark:text-slate-400">
+                        Aucune source n'est disponible pour cet article.
+                      </p>
+                    </div>
+                  )}
+                  
+                  <div className="mt-4">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      Les sources sont automatiquement collectées lors de la génération de l'article.
+                      Si aucune source n'est affichée, c'est que l'article a été généré sans références spécifiques.
+                    </p>
                   </div>
                 </div>
               </TabsContent>
