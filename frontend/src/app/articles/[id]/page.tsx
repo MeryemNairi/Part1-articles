@@ -53,43 +53,57 @@ export default function ArticleDetailPage() {
     // Récupérer les données de la session
     const sessionData = JSON.parse(localStorage.getItem(`session_${currentSessionId}`) || "{}")
     
-    if (!sessionData || !sessionData.titles || !sessionData.articles) {
+    if (!sessionData) {
+      router.push("/")
+      return
+    }
+    
+    // Vérifier si une variation est sélectionnée
+    if (!sessionData.selectedVariation) {
+      router.push("/articles")
+      return
+    }
+    
+    // Vérifier si des articles existent
+    if (!sessionData.articles) {
+      router.push("/articles")
+      return
+    }
+    
+    const articleIndex = Number(id)
+    
+    // Vérifier si l'article spécifique existe
+    if (!sessionData.articles[articleIndex]) {
       router.push("/articles")
       return
     }
     
     setSessionId(currentSessionId)
-    setTopic(sessionData.topic)
-    setTone(sessionData.tone)
+    setTopic(sessionData.topic || "")
+    setTone(sessionData.tone || "")
     setAdditionalContext(sessionData.additionalContext || "")
     setAvoidContext(sessionData.avoidContext || "")
     
-    const articleIndex = Number(id)
+    setTitle(sessionData.articles[articleIndex].title)
+    setContent(sessionData.articles[articleIndex].content)
+    setEditedContent(sessionData.articles[articleIndex].content)
     
-    if (sessionData.titles[articleIndex] && sessionData.articles[articleIndex]) {
-      setTitle(sessionData.titles[articleIndex])
-      setContent(sessionData.articles[articleIndex].content)
-      setEditedContent(sessionData.articles[articleIndex].content)
-      
-      // Récupérer les sources si elles existent
-      if (sessionData.articles[articleIndex].sources) {
-        setSources(sessionData.articles[articleIndex].sources)
-      }
-      
-      // Générer un prompt pour l'image basé sur le titre
-      setImagePrompt(`Illustration pour un article intitulé "${sessionData.titles[articleIndex]}" sur le sujet ${sessionData.topic}`)
-      
-      // Vérifier si l'article est déjà validé
-      if (sessionData.articles[articleIndex].isValidated) {
-        setIsValidated(true)
-      }
-      
-      // Récupérer l'image si elle existe
-      if (sessionData.articles[articleIndex].image) {
-        setImage(sessionData.articles[articleIndex].image)
-      }
-    } else {
-      router.push("/articles")
+    // Récupérer les sources si elles existent
+    if (sessionData.articles[articleIndex].sources) {
+      setSources(sessionData.articles[articleIndex].sources)
+    }
+    
+    // Générer un prompt pour l'image basé sur le titre
+    setImagePrompt(`Illustration pour un article intitulé "${sessionData.articles[articleIndex].title}" sur le sujet ${sessionData.topic}`)
+    
+    // Vérifier si l'article est déjà validé
+    if (sessionData.articles[articleIndex].isValidated) {
+      setIsValidated(true)
+    }
+    
+    // Récupérer l'image si elle existe
+    if (sessionData.articles[articleIndex].image) {
+      setImage(sessionData.articles[articleIndex].image)
     }
   }, [id, router])
 

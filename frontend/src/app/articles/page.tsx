@@ -13,6 +13,9 @@ export default function ArticlesPage() {
   const [topic, setTopic] = useState("")
   const [tone, setTone] = useState("")
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [selectedVariation, setSelectedVariation] = useState<string | null>(null)
+  const [variationName, setVariationName] = useState<string>("")
+  const [variationLogo, setVariationLogo] = useState<string | null>(null)
   const [generatedArticles, setGeneratedArticles] = useState<Record<number, boolean>>({})
   const [isGeneratingAll, setIsGeneratingAll] = useState(false)
   const [currentGeneratingIndex, setCurrentGeneratingIndex] = useState<number | null>(null)
@@ -31,15 +34,50 @@ export default function ArticlesPage() {
     // Récupérer les données de la session
     const sessionData = JSON.parse(localStorage.getItem(`session_${currentSessionId}`) || "{}")
     
-    if (!sessionData || !sessionData.titles || !sessionData.topic) {
+    if (!sessionData) {
       router.push("/")
       return
     }
     
+    // Vérifier si une variation est sélectionnée
+    if (!sessionData.selectedVariation) {
+      // Si aucune variation n'est sélectionnée mais qu'il y a des variations disponibles
+      if (sessionData.variations && sessionData.variations.length > 0) {
+        // Sélectionner la première variation par défaut
+        sessionData.selectedVariation = sessionData.variations[0].id
+        localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData))
+        console.log("Aucune variation sélectionnée, sélection de la première variation par défaut")
+      } else {
+        router.push("/logos")
+        return
+      }
+    }
+    
+    const selectedVar = sessionData.selectedVariation
+    
+    // Vérifier si des titres existent pour la variation sélectionnée
+    if (!sessionData.titles || !sessionData.titles[selectedVar]) {
+      console.log("Aucun titre trouvé pour cette variation, redirection vers la page de contenu")
+      router.push("/content")
+      return
+    }
+    
     setSessionId(currentSessionId)
-    setTitles(sessionData.titles)
-    setTopic(sessionData.topic)
-    setTone(sessionData.tone)
+    setSelectedVariation(selectedVar)
+    setTitles(sessionData.titles[selectedVar])
+    setTopic(sessionData.topic || "")
+    setTone(sessionData.tone || "")
+    
+    // Récupérer le nom de la variation
+    const variation = sessionData.variations.find((v: any) => v.id === selectedVar)
+    if (variation) {
+      setVariationName(variation.title)
+    }
+    
+    // Récupérer le logo de la variation
+    if (sessionData.logos && sessionData.logos[selectedVar]) {
+      setVariationLogo(sessionData.logos[selectedVar])
+    }
     
     // Récupérer les articles déjà générés
     if (sessionData.articles) {
@@ -60,6 +98,9 @@ export default function ArticlesPage() {
     setError(null)
 
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    
+    // Récupérer les données de la session
+    const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}")
 
     try {
       const response = await fetch(`${apiUrl}/api/article`, {
@@ -70,6 +111,10 @@ export default function ArticlesPage() {
         body: JSON.stringify({
           titre: titles[index],
           sujet: topic,
+          tone: tone,
+          additional_context: sessionData.additionalContext || "",
+          avoid_context: sessionData.avoidContext || "",
+          website: variationName
         }),
       })
 
@@ -89,7 +134,6 @@ export default function ArticlesPage() {
       }))
       
       // Mettre à jour la session
-      const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}")
       if (!sessionData.articles) {
         sessionData.articles = {}
       }
@@ -98,6 +142,11 @@ export default function ArticlesPage() {
         title: titles[index],
         content: articleContent,
         isValidated: false
+      }
+      
+      // Ajouter les sources si elles existent
+      if (data.sources) {
+        sessionData.articles[index].sources = data.sources
       }
       
       localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData))
@@ -153,13 +202,24 @@ export default function ArticlesPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <Link
-                  href="/"
+                  href="/content"
                   className="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 transition-colors"
                 >
                   <ArrowLeft className="h-5 w-5" />
-                  <span className="sr-only">Retour aux titres</span>
+                  <span className="sr-only">Retour au contenu</span>
                 </Link>
-                <h1 className="text-2xl md:text-3xl font-bold">Mes Articles</h1>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-2xl md:text-3xl font-bold">Mes Articles</h1>
+                  {variationLogo && (
+                    <div className="w-8 h-8">
+                      <img 
+                        src={variationLogo} 
+                        alt={`Logo pour ${variationName}`} 
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
               
               {!isGeneratingAll && Object.keys(generatedArticles).length < titles.length && (
@@ -171,6 +231,13 @@ export default function ArticlesPage() {
                 </Button>
               )}
             </div>
+            
+            {/* Afficher le nom du site web */}
+            {variationName && (
+              <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                Site web: <span className="font-medium text-purple-600 dark:text-purple-400">{variationName}</span>
+              </div>
+            )}
           </CardHeader>
           
           <CardContent className="p-6">
@@ -198,10 +265,10 @@ export default function ArticlesPage() {
             {titles.length === 0 ? (
               <div className="text-center py-12">
                 <p className="text-slate-500 dark:text-slate-400">
-                  Aucun article n'a été généré. Veuillez retourner à la page d'accueil.
+                  Aucun article n'a été généré. Veuillez retourner à la page de contenu.
                 </p>
-                <Button onClick={() => router.push("/")} className="mt-4">
-                  Créer un nouvel article
+                <Button onClick={() => router.push("/content")} className="mt-4">
+                  Retour à la génération de contenu
                 </Button>
               </div>
             ) : (
