@@ -509,6 +509,228 @@ async def translate_content(request: dict = Body(...)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/generate-website-theme")
+async def generate_website_theme(request: dict = Body(...)):
+    try:
+        print(f"Requête reçue pour générer un thème de site web")
+        theme = request.get("theme", "")
+        number_of_variations = request.get("variations", 3)
+        
+        if not api_key:
+            # Fallback pour les tests
+            variations = [
+                {
+                    "id": "var1",
+                    "title": f"{theme} - Version Professionnelle",
+                    "description": f"Un site web professionnel sur {theme} avec une approche business.",
+                    "style": "Professionnel et épuré"
+                },
+                {
+                    "id": "var2",
+                    "title": f"{theme} - Version Créative",
+                    "description": f"Un site web créatif sur {theme} avec un design unique.",
+                    "style": "Créatif et coloré"
+                },
+                {
+                    "id": "var3",
+                    "title": f"{theme} - Version Minimaliste",
+                    "description": f"Un site web minimaliste sur {theme} avec un design simple.",
+                    "style": "Minimaliste et élégant"
+                }
+            ]
+            
+            return {"variations": variations[:number_of_variations]}
+        
+        try:
+            llm = ChatOpenAI(api_key=api_key, model_name=model, temperature=0.7)
+            
+            prompt = f"""
+            Génère {number_of_variations} variations de thèmes de sites web basés sur le sujet principal: "{theme}".
+            
+            Pour chaque variation, fournis:
+            1. Un titre unique
+            2. Une brève description (1-2 phrases)
+            3. Un style visuel suggéré
+            
+            Les variations doivent être différentes les unes des autres et explorer différentes approches du même thème.
+            
+            Format de réponse: JSON
+            [
+                {{
+                    "title": "Titre de la variation",
+                    "description": "Description de la variation",
+                    "style": "Style visuel suggéré"
+                }},
+                ...
+            ]
+            """
+            
+            response = llm.invoke([HumanMessage(content=prompt)])
+            
+            # Extraire le JSON de la réponse
+            import json
+            import re
+            
+            # Rechercher un bloc JSON dans la réponse
+            json_match = re.search(r'\[[\s\S]*\]', response.content)
+            if json_match:
+                json_str = json_match.group(0)
+                variations_data = json.loads(json_str)
+                
+                # Ajouter des IDs aux variations
+                variations = []
+                for i, var in enumerate(variations_data):
+                    variations.append({
+                        "id": f"var{i+1}",
+                        "title": var.get("title", f"{theme} - Variation {i+1}"),
+                        "description": var.get("description", f"Une variation de site web sur {theme}."),
+                        "style": var.get("style", "Style standard")
+                    })
+                
+                return {"variations": variations[:number_of_variations]}
+            else:
+                # Fallback si le format JSON n'est pas détecté
+                variations = [
+                    {
+                        "id": "var1",
+                        "title": f"{theme} - Version Professionnelle",
+                        "description": f"Un site web professionnel sur {theme} avec une approche business.",
+                        "style": "Professionnel et épuré"
+                    },
+                    {
+                        "id": "var2",
+                        "title": f"{theme} - Version Créative",
+                        "description": f"Un site web créatif sur {theme} avec un design unique.",
+                        "style": "Créatif et coloré"
+                    },
+                    {
+                        "id": "var3",
+                        "title": f"{theme} - Version Minimaliste",
+                        "description": f"Un site web minimaliste sur {theme} avec un design simple.",
+                        "style": "Minimaliste et élégant"
+                    }
+                ]
+                
+                return {"variations": variations[:number_of_variations]}
+        except Exception as e:
+            print(f"Erreur lors de la génération des variations avec LLM: {str(e)}")
+            traceback.print_exc()
+            
+            # Fallback en cas d'erreur
+            variations = [
+                {
+                    "id": "var1",
+                    "title": f"{theme} - Version Professionnelle",
+                    "description": f"Un site web professionnel sur {theme} avec une approche business.",
+                    "style": "Professionnel et épuré"
+                },
+                {
+                    "id": "var2",
+                    "title": f"{theme} - Version Créative",
+                    "description": f"Un site web créatif sur {theme} avec un design unique.",
+                    "style": "Créatif et coloré"
+                },
+                {
+                    "id": "var3",
+                    "title": f"{theme} - Version Minimaliste",
+                    "description": f"Un site web minimaliste sur {theme} avec un design simple.",
+                    "style": "Minimaliste et élégant"
+                }
+            ]
+            
+            return {"variations": variations[:number_of_variations]}
+    except Exception as e:
+        print(f"Erreur lors de la génération des variations de thème: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/generate-logos")
+async def generate_logos(request: dict = Body(...)):
+    try:
+        print(f"Requête reçue pour générer des logos")
+        variations = request.get("variations", [])
+        logo_descriptions = request.get("logo_descriptions", {})
+        
+        # Vérifier si fal.ai est disponible
+        fal_api_key = os.getenv("FAL_API_KEY", "")
+        
+        # Résultats à retourner
+        results = []
+        
+        for variation in variations:
+            var_id = variation.get("id", "")
+            title = variation.get("title", "")
+            description = variation.get("description", "")
+            style = variation.get("style", "")
+            
+            # Obtenir la description du logo si fournie, sinon en générer une
+            logo_prompt = logo_descriptions.get(var_id, "")
+            if not logo_prompt:
+                # Générer une description de logo basée sur le thème
+                logo_prompt = f"Un logo moderne pour {title}. Style: {style}."
+            
+            logo_url = ""
+            
+            # Essayer de générer un logo avec fal.ai si disponible
+            if fal_api_key:
+                try:
+                    headers = {
+                        "Authorization": f"Key {fal_api_key}",
+                        "Content-Type": "application/json"
+                    }
+                    
+                    payload = {
+                        "prompt": f"logo design: {logo_prompt}. Minimalist, professional, vector style, white background, no text",
+                        "negative_prompt": "text, words, letters, signature, watermark, low quality, blurry",
+                        "height": 512,
+                        "width": 512,
+                        "num_images": 1
+                    }
+                    
+                    response = requests.post(
+                        "https://api.fal.ai/v1/stable-diffusion/sdxl",
+                        headers=headers,
+                        json=payload,
+                        timeout=15
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        logo_url = data.get("images", [{}])[0].get("url", "")
+                    else:
+                        print(f"Erreur fal.ai: {response.status_code} - {response.text}")
+                except Exception as e:
+                    print(f"Erreur lors de la génération du logo avec fal.ai: {str(e)}")
+                    traceback.print_exc()
+            
+            # Si pas de logo généré, utiliser un placeholder
+            if not logo_url:
+                # Utiliser des logos placeholder différents pour chaque variation
+                placeholder_logos = [
+                    "https://via.placeholder.com/200x200.png?text=Logo+1",
+                    "https://via.placeholder.com/200x200.png?text=Logo+2",
+                    "https://via.placeholder.com/200x200.png?text=Logo+3",
+                    "https://via.placeholder.com/200x200.png?text=Logo+4",
+                    "https://via.placeholder.com/200x200.png?text=Logo+5"
+                ]
+                
+                # Utiliser un index basé sur l'ID de variation pour choisir un logo placeholder
+                index = int(var_id.replace("var", "")) % len(placeholder_logos) if var_id.replace("var", "").isdigit() else 0
+                logo_url = placeholder_logos[index - 1]
+            
+            # Ajouter le résultat
+            results.append({
+                "variation_id": var_id,
+                "logo_url": logo_url,
+                "logo_prompt": logo_prompt
+            })
+        
+        return {"logos": results}
+    except Exception as e:
+        print(f"Erreur lors de la génération des logos: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     print("Démarrage du serveur API...")
     uvicorn.run(app, host="0.0.0.0", port=8000) 
