@@ -275,64 +275,94 @@ async def generate_article(request: dict = Body(...)):
         print(f"Requête reçue pour générer un article")
         titre = request.get("titre", "")
         sujet = request.get("sujet", "")
-        additional_context = request.get("additional_context", "")
-        avoid_context = request.get("avoid_context", "")
-        article_length = request.get("article_length", 1500)
-        detail_level = request.get("detail_level", 3)
         
-        if not api_key:
-            raise ValueError("Clé API OpenAI non configurée")
+        # Utiliser directement la clé SERP API
+        serp_api_key = "f4dc513226b4b703cdc98a18c2d325a559dcccd3b2e73da115045fe22a152af0"
+        print("Utilisation de la clé SERP API directement dans le code")
+        
+        # Effectuer le scraping web avec une approche plus robuste
+        web_content = ""
+        sources = []
         
         try:
-            llm = ChatOpenAI(api_key=api_key, model_name=model, temperature=0.7)
+            print(f"Tentative de scraping pour: {sujet} - {titre}")
             
-            # Construire le prompt avec les éléments à inclure et à éviter
-            include_section = ""
-            if additional_context:
-                include_section = f"""
-                Éléments à inclure:
-                {additional_context}
-                """
+            # Code de scraping intégré directement
+            query = f"{sujet} {titre}"
+            print(f"Requête de recherche: {query}")
             
-            avoid_section = ""
-            if avoid_context:
-                avoid_section = f"""
-                Éléments à éviter:
-                {avoid_context}
-                """
+            # Utiliser une approche plus simple avec requests
+            search_url = f"https://serpapi.com/search.json?q={query.replace(' ', '+')}&api_key={serp_api_key}&engine=google"
+            print(f"URL de recherche: {search_url}")
             
-            prompt = f"""
-            Tu es un rédacteur professionnel spécialisé dans la création d'articles de blog de haute qualité.
+            response = requests.get(search_url, timeout=15)  # Augmenter le timeout
+            print(f"Réponse reçue: status code {response.status_code}")
             
-            Écris un article complet et détaillé sur le sujet suivant: "{titre}".
-            
-            Contexte général: {sujet}
-            
-            {include_section}
-            
-            {avoid_section}
-            
-            Longueur approximative: {article_length} mots
-            Niveau de détail: {detail_level}/5
-            
-            L'article doit être bien structuré avec:
-            - Une introduction engageante
-            - Des sections clairement définies avec des sous-titres
-            - Des paragraphes concis et informatifs
-            - Une conclusion qui résume les points clés
-            
-            Utilise le format Markdown pour la mise en forme.
-            """
-            
-            response = llm.invoke([HumanMessage(content=prompt)])
-            content = response.content
-            
-            print(f"Article généré avec succès pour: {titre}")
-            return {"content": content}
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Extraire les résultats organiques
+                organic_results = data.get("organic_results", [])
+                print(f"Nombre de résultats organiques: {len(organic_results)}")
+                
+                if organic_results:
+                    for i, result in enumerate(organic_results[:3]):
+                        title = result.get("title", "")
+                        snippet = result.get("snippet", "")
+                        link = result.get("link", "")
+                        
+                        print(f"Résultat {i+1}: {title} - {link}")
+                        web_content += f"## {title}\n\n{snippet}\n\n"
+                        sources.append(f"{title} - {link}")
+                    
+                    print(f"Contenu web récupéré: {len(web_content)} caractères")
+                    print(f"Sources trouvées: {len(sources)}")
+                else:
+                    print("Aucun résultat organique trouvé")
+            else:
+                print(f"Erreur API SERP: {response.status_code}")
         except Exception as e:
-            print(f"Erreur lors de la génération de l'article avec LLM: {str(e)}")
+            print(f"Erreur lors du scraping: {str(e)}")
             traceback.print_exc()
-            raise HTTPException(status_code=500, detail=str(e))
+        
+        # Si aucun contenu n'a été trouvé, utiliser un message par défaut
+        if not web_content:
+            web_content = f"Aucune information spécifique trouvée sur '{titre}'. Génération d'un article basé sur les connaissances générales."
+            print("Utilisation du contenu par défaut")
+        
+        # Générer l'article avec le contenu web
+        llm = ChatOpenAI(api_key=api_key, model_name=model, temperature=0.7)
+        
+        # Inclure les sources dans le prompt
+        sources_text = "\n".join([f"- {source}" for source in sources]) if sources else "Aucune source spécifique disponible"
+        
+        prompt = f"""
+        Tu es un expert en rédaction d'articles.
+        
+        Rédige un article complet et détaillé sur "{titre}".
+        
+        Utilise ces informations comme base pour ton article:
+        {web_content}
+        
+        Sources d'information:
+        {sources_text}
+        
+        L'article doit:
+        - Avoir une introduction captivante
+        - Contenir au moins 3 sections principales avec sous-titres
+        - Inclure des exemples concrets
+        - Se terminer par une conclusion
+        - Citer les sources d'information quand c'est pertinent
+        
+        Format: Markdown avec des sections et sous-sections.
+        """
+        
+        response = llm.invoke([HumanMessage(content=prompt)])
+        content = response.content
+        
+        # Ne pas ajouter les sources à la fin de l'article, mais les renvoyer séparément
+        print(f"Article généré avec succès pour: {titre}")
+        return {"content": content, "sources": sources}
     except Exception as e:
         print(f"Erreur lors de la génération de l'article: {str(e)}")
         traceback.print_exc()
