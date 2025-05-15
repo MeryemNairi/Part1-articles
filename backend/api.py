@@ -22,6 +22,7 @@ import datetime
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 from starlette.background import BackgroundTask
+from bs4 import BeautifulSoup
 
 # Importation conditionnelle des bibliothèques LLM
 try:
@@ -284,10 +285,6 @@ async def generate_article(request: dict = Body(...)):
         titre = request.get("titre", "")
         sujet = request.get("sujet", "")
         
-        # Utiliser directement la clé SERP API
-        serp_api_key = "f4dc513226b4b703cdc98a18c2d325a559dcccd3b2e73da115045fe22a152af0"
-        print("Utilisation de la clé SERP API directement dans le code")
-        
         # Effectuer le scraping web avec une approche plus robuste
         web_content = ""
         sources = []
@@ -300,11 +297,20 @@ async def generate_article(request: dict = Body(...)):
             print(f"Requête de recherche: {query}")
             
             # Utiliser une approche plus simple avec requests
-            search_url = f"https://serpapi.com/search.json?q={query.replace(' ', '+')}&api_key={serp_api_key}&engine=google"
+            serp_api_key = "f4dc513226b4b703cdc98a18c2d325a559dcccd3b2e73da115045fe22a152af0"
+            search_url = f"https://serpapi.com/search.json?q={query.replace(' ', '+')}&api_key={serp_api_key}&engine=google&num=5"
             print(f"URL de recherche: {search_url}")
             
-            response = requests.get(search_url, timeout=15)  # Augmenter le timeout
-            print(f"Réponse reçue: status code {response.status_code}")
+            # Vérifier la connectivité Internet avant d'envoyer la requête
+            try:
+                test_connection = requests.get("https://www.google.com", timeout=5)
+                print(f"Test de connexion Internet: {test_connection.status_code}")
+            except Exception as e:
+                print(f"Erreur lors du test de connexion Internet: {str(e)}")
+            
+            # Envoyer la requête à SERP API avec un timeout plus long
+            response = requests.get(search_url, timeout=30)
+            print(f"Réponse SERP API reçue: status code {response.status_code}")
             
             if response.status_code == 200:
                 data = response.json()
@@ -322,13 +328,43 @@ async def generate_article(request: dict = Body(...)):
                         print(f"Résultat {i+1}: {title} - {link}")
                         web_content += f"## {title}\n\n{snippet}\n\n"
                         sources.append(f"{title} - {link}")
+                        
+                        # Essayer de récupérer plus de contenu en visitant la page
+                        try:
+                            print(f"Tentative d'extraction de contenu supplémentaire depuis: {link}")
+                            page_response = requests.get(link, timeout=10, headers={
+                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                            })
+                            
+                            if page_response.status_code == 200:
+                                # Extraire le texte principal de la page
+                                soup = BeautifulSoup(page_response.text, 'html.parser')
+                                
+                                # Supprimer les scripts, styles et balises non pertinentes
+                                for script in soup(["script", "style", "header", "footer", "nav"]):
+                                    script.extract()
+                                
+                                # Extraire le texte
+                                page_text = soup.get_text(separator=' ', strip=True)
+                                
+                                # Nettoyer le texte
+                                page_text = re.sub(r'\s+', ' ', page_text).strip()
+                                
+                                # Limiter la taille du texte extrait
+                                if len(page_text) > 1500:
+                                    page_text = page_text[:1500] + "..."
+                                
+                                web_content += f"\nContenu supplémentaire de {title}:\n{page_text}\n\n"
+                                print(f"Contenu supplémentaire extrait: {len(page_text)} caractères")
+                        except Exception as e:
+                            print(f"Erreur lors de l'extraction de contenu supplémentaire: {str(e)}")
                     
-                    print(f"Contenu web récupéré: {len(web_content)} caractères")
+                    print(f"Contenu web total récupéré: {len(web_content)} caractères")
                     print(f"Sources trouvées: {len(sources)}")
                 else:
                     print("Aucun résultat organique trouvé")
             else:
-                print(f"Erreur API SERP: {response.status_code}")
+                print(f"Erreur API SERP: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"Erreur lors du scraping: {str(e)}")
             traceback.print_exc()
@@ -813,25 +849,20 @@ async def generate_all_content(request: dict = Body(...)):
         variations = request.get("variations", [])
         force_regenerate = request.get("forceRegenerate", False)
         
-        if not variations:
-            return {"error": "Aucune variation fournie"}
-        
         print(f"Nombre de variations à traiter: {len(variations)}")
         print(f"Régénération forcée: {force_regenerate}")
         
-        # Pour chaque variation, générer 5 articles
         for i, variation in enumerate(variations):
             print(f"Traitement de la variation {i+1}/{len(variations)}: {variation.get('title', 'Sans titre')}")
             
-            # Conserver le logo s'il existe
-            logo = variation.get("logo")
+            # Récupérer le logo s'il existe
+            logo = variation.get("logo", None)
             
-            # Initialiser la structure de contenu si elle n'existe pas
+            # Initialiser le contenu si nécessaire
             if "content" not in variation:
                 variation["content"] = {}
             
-            # Toujours régénérer les articles si force_regenerate est True
-            if force_regenerate or "articles" not in variation["content"]:
+            if "articles" not in variation["content"]:
                 variation["content"]["articles"] = []
             
             # Générer 5 articles si aucun n'existe déjà ou si force_regenerate est True
@@ -861,46 +892,96 @@ async def generate_all_content(request: dict = Body(...)):
                             # Fallback pour les tests
                             title = f"Article {j+1} pour {site_name}"
                         
-                        # Générer le contenu de l'article
+                        print(f"Titre généré: {title}")
+                        
+                        # DÉBUT DU SCRAPING WEB POUR CET ARTICLE
+                        print(f"Démarrage du scraping web pour l'article: {title}")
+                        serp_api_key = "f4dc513226b4b703cdc98a18c2d325a559dcccd3b2e73da115045fe22a152af0"
+                        
+                        article_web_content = ""
+                        article_sources = []
+                        
+                        try:
+                            # Construire la requête de recherche
+                            query = f"{title} {site_name} {site_description}"
+                            search_url = f"https://serpapi.com/search.json?q={query.replace(' ', '+')}&api_key={serp_api_key}&engine=google&num=5"
+                            
+                            print(f"Requête SERP API pour l'article: {search_url}")
+                            response = requests.get(search_url, timeout=30)
+                            
+                            print(f"Réponse SERP API reçue: status code {response.status_code}")
+                            
+                            if response.status_code == 200:
+                                data = response.json()
+                                
+                                # Extraire les résultats organiques
+                                organic_results = data.get("organic_results", [])
+                                print(f"Nombre de résultats organiques trouvés: {len(organic_results)}")
+                                
+                                if organic_results:
+                                    for k, result in enumerate(organic_results[:3]):
+                                        result_title = result.get("title", "")
+                                        result_snippet = result.get("snippet", "")
+                                        result_link = result.get("link", "")
+                                        
+                                        print(f"Source {k+1}: {result_title} - {result_link}")
+                                        
+                                        # Ajouter à notre contenu web
+                                        article_web_content += f"\n\nSource {k+1}: {result_title}\n{result_snippet}\n"
+                                        article_sources.append(f"{result_title} - {result_link}")
+                                else:
+                                    print("Aucun résultat organique trouvé")
+                            else:
+                                print(f"Erreur API SERP: {response.status_code} - {response.text}")
+                        except Exception as e:
+                            print(f"Erreur lors du scraping web: {str(e)}")
+                            traceback.print_exc()
+                            article_web_content = ""
+                        
+                        # Si aucun contenu n'a été trouvé, utiliser un message par défaut
+                        if not article_web_content:
+                            article_web_content = f"Aucune information spécifique trouvée sur '{title}'. Génération d'un article basé sur les connaissances générales."
+                            print("Utilisation du contenu par défaut")
+                        else:
+                            print(f"Contenu web récupéré avec succès: {len(article_web_content)} caractères")
+                        # FIN DU SCRAPING WEB
+                        
+                        # Générer le contenu de l'article avec le contenu web
                         content_prompt = f"""
                         Écris un article complet pour un site web nommé '{site_name}' avec le titre '{title}'.
                         
                         Description du site: {site_description}
                         
+                        Utilise les informations suivantes récupérées du web pour enrichir ton article:
+                        {article_web_content}
+                        
                         L'article doit:
                         - Être informatif et engageant
-                        - Contenir environ 300 mots
+                        - Contenir environ 500 mots
                         - Être structuré avec une introduction, un développement et une conclusion
                         - Être adapté au thème du site
+                        - Inclure des faits et informations pertinentes tirés des sources web
+                        
+                        Format: Markdown avec des sections et sous-sections.
                         """
                         
                         content = ""
+                        
                         if api_key:
                             llm = ChatOpenAI(api_key=api_key, model_name=model, temperature=0.7)
                             response = llm.invoke([HumanMessage(content=content_prompt)])
                             content = response.content.strip()
+                            
+                            print(f"Article généré: {len(content)} caractères")
                         else:
                             # Fallback pour les tests
-                            content = f"""
-                            Ceci est un article généré automatiquement pour {site_name}.
-                            
-                            Introduction:
-                            Bienvenue dans cet article sur {title}. Nous allons explorer ce sujet passionnant.
-                            
-                            Développement:
-                            Voici quelques points importants à considérer sur ce sujet.
-                            - Premier point intéressant
-                            - Deuxième aspect à explorer
-                            - Troisième élément à prendre en compte
-                            
-                            Conclusion:
-                            En résumé, nous avons vu plusieurs aspects importants de {title}.
-                            """
+                            content = f"Contenu par défaut pour l'article {j+1}."
                         
                         # Ajouter l'article à la liste
                         variation["content"]["articles"].append({
                             "title": title,
-                            "content": content
+                            "content": content,
+                            "sources": article_sources
                         })
                         
                     except Exception as e:
