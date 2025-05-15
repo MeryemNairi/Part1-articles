@@ -4,29 +4,26 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardFooter } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Loader2, ArrowLeft, ArrowRight, Edit2, RefreshCw } from "lucide-react"
-import { Textarea } from "@/components/ui/textarea"
+import { Loader2, ArrowLeft, FileText, RefreshCw } from "lucide-react"
 import Link from "next/link"
+import { toast } from "@/components/ui/use-toast"
+
+// Définir une interface pour l'article
+interface Article {
+  title: string;
+  content: string;
+  isValidated?: boolean;
+}
 
 export default function ContentPage() {
   const router = useRouter()
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [variations, setVariations] = useState<any[]>([])
-  const [logos, setLogos] = useState<Record<string, string>>({})
-  const [selectedVariation, setSelectedVariation] = useState<string | null>(null)
-  const [topic, setTopic] = useState("")
-  const [tone, setTone] = useState("standard")
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [titles, setTitles] = useState<Record<string, string[]>>({})
+  const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [additionalContext, setAdditionalContext] = useState("")
-  const [avoidContext, setAvoidContext] = useState("")
-  const [editingTitleIndex, setEditingTitleIndex] = useState<string | null>(null)
-  const [editedTitle, setEditedTitle] = useState("")
-  const [isRegeneratingTitle, setIsRegeneratingTitle] = useState<Record<string, boolean>>({})
+  const [isRegeneratingContent, setIsRegeneratingContent] = useState<Record<string, boolean>>({})
+  const [regenerationProgress, setRegenerationProgress] = useState<Record<string, number>>({})
+  const [isExporting, setIsExporting] = useState<string | null>(null)
 
   useEffect(() => {
     // Récupérer l'ID de la session actuelle
@@ -40,188 +37,137 @@ export default function ContentPage() {
     // Récupérer les données de la session
     const sessionData = JSON.parse(localStorage.getItem(`session_${currentSessionId}`) || "{}")
     
-    if (!sessionData || !sessionData.variations || !sessionData.logos) {
-      router.push("/logos")
+    if (!sessionData || !sessionData.variations) {
+      router.push("/")
       return
     }
+    
+    console.log("Données de session chargées:", sessionData)
     
     setSessionId(currentSessionId)
-    setVariations(sessionData.variations)
-    setLogos(sessionData.logos)
     
-    // Sélectionner la variation par défaut (celle qui a été choisie dans la page des logos)
-    if (sessionData.selectedVariation) {
-      setSelectedVariation(sessionData.selectedVariation)
-    } else if (sessionData.variations.length > 0) {
-      setSelectedVariation(sessionData.variations[0].id)
-    }
-    
-    // Récupérer les titres s'ils existent déjà
-    if (sessionData.titles) {
-      setTitles(sessionData.titles)
-    }
-    
-    // Si une variation est sélectionnée mais n'a pas de titres, générer automatiquement des titres
-    if (sessionData.selectedVariation && 
-        (!sessionData.titles || !sessionData.titles[sessionData.selectedVariation])) {
-      // Attendre que les états soient mis à jour avant de générer les titres
-      setTimeout(() => {
-        if (sessionData.selectedVariation) {
-          setSelectedVariation(sessionData.selectedVariation)
-          // Générer les titres automatiquement après un court délai
-          setTimeout(() => generateTitles(), 500)
+    // Récupérer les logos s'ils existent
+    if (sessionData.logos) {
+      // Mettre à jour les variations avec les logos
+      const variationsWithLogos = sessionData.variations.map((variation: any, index: number) => {
+        return {
+          ...variation,
+          logo: sessionData.logos[variation.id] || null
         }
-      }, 100)
+      })
+      
+      setVariations(variationsWithLogos)
+    } else {
+      setVariations(sessionData.variations)
     }
+    
+    setIsLoading(false)
   }, [router])
 
-  const generateTitles = async () => {
-    if (!sessionId || !selectedVariation) return
-
-    setIsGenerating(true)
-    setError(null)
-
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  const navigateToArticle = (variationIndex: number, articleIndex: number) => {
+    if (!sessionId) return
     
-    // Trouver la variation sélectionnée
-    const variation = variations.find(v => v.id === selectedVariation)
-    if (!variation) {
-      setError("Variation non trouvée")
-      setIsGenerating(false)
-      return
-    }
-
     try {
-      const response = await fetch(`${apiUrl}/api/titles`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          sujet: variation.title, 
-          tone,
-          additional_context: additionalContext,
-          avoid_context: avoidContext
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Erreur: ${response.status}`)
-      }
-
-      const data = await response.json()
+      console.log(`Navigation vers l'article: variation=${variationIndex}, article=${articleIndex}`)
       
-      // Mettre à jour les titres
-      setTitles(prev => ({
-        ...prev,
-        [selectedVariation]: data.titles
-      }))
-      
-      // Mettre à jour la session
+      // Stocker l'article sélectionné dans la session
       const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}")
-      if (!sessionData.titles) {
-        sessionData.titles = {}
+      
+      // Récupérer l'article
+      const variation = sessionData.variations[variationIndex]
+      const article = variation.content.articles[articleIndex]
+      
+      console.log("Article trouvé:", article.title)
+      
+      // Stocker l'article dans la structure attendue par votre page d'article existante
+      if (!sessionData.articles) {
+        sessionData.articles = []
       }
-      sessionData.titles[selectedVariation] = data.titles
+      
+      // Ajouter l'article à la liste des articles si nécessaire
+      if (!sessionData.articles.some((a: Article) => a.title === article.title)) {
+        sessionData.articles.push({
+          title: article.title,
+          content: article.content,
+          isValidated: false
+        })
+      }
+      
+      // Trouver l'index de l'article dans la liste des articles
+      const articleId = sessionData.articles.findIndex((a: Article) => a.title === article.title)
+      
+      console.log(`ID de l'article: ${articleId}`)
+      
+      // Sauvegarder les modifications
       localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData))
+      
+      // Utiliser window.location pour une navigation forcée
+      window.location.href = `/articles/${articleId}`
     } catch (err) {
-      setError(`Une erreur s'est produite: ${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      setIsGenerating(false)
+      console.error("Erreur lors de la navigation:", err)
     }
   }
 
-  const navigateToArticles = () => {
-    if (!sessionId || !selectedVariation) return
+  const regenerateSiteContent = async (variationIndex: number) => {
+    if (!sessionId) return;
     
-    // Vérifier si des titres ont été générés pour la variation sélectionnée
-    if (!titles[selectedVariation] || titles[selectedVariation].length === 0) {
-      setError("Veuillez générer des titres avant de continuer")
-      return
-    }
+    const variationId = variations[variationIndex].id;
     
-    // Mettre à jour la session avec les informations supplémentaires
-    const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}")
-    sessionData.selectedVariation = selectedVariation
-    sessionData.topic = variations.find(v => v.id === selectedVariation)?.title || ""
-    sessionData.tone = tone
-    sessionData.additionalContext = additionalContext
-    sessionData.avoidContext = avoidContext
-    localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData))
-    
-    // Rediriger vers la page des articles
-    router.push("/articles")
-  }
-
-  const startEditingTitle = (variationId: string, index: number) => {
-    const titleKey = `${variationId}_${index}`;
-    setEditingTitleIndex(titleKey);
-    setEditedTitle(titles[variationId]?.[index] || "");
-  };
-
-  const saveEditedTitle = () => {
-    if (!editingTitleIndex || !selectedVariation) return;
-    
-    const [variationId, indexStr] = editingTitleIndex.split('_');
-    const index = parseInt(indexStr);
-    
-    if (isNaN(index) || !titles[variationId]) return;
-    
-    // Créer une copie des titres actuels
-    const newTitles = { ...titles };
-    const variationTitles = [...newTitles[variationId]];
-    variationTitles[index] = editedTitle;
-    newTitles[variationId] = variationTitles;
-    
-    // Mettre à jour l'état
-    setTitles(newTitles);
-    
-    // Mettre à jour la session
-    if (sessionId) {
-      const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}");
-      if (!sessionData.titles) {
-        sessionData.titles = {};
-      }
-      sessionData.titles[variationId] = variationTitles;
-      localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData));
-    }
-    
-    // Réinitialiser l'état d'édition
-    setEditingTitleIndex(null);
-  };
-
-  const regenerateTitle = async (variationId: string, index: number) => {
-    if (!sessionId || !selectedVariation) return;
-    
-    const titleKey = `${variationId}_${index}`;
-    
-    // Mettre à jour l'état pour afficher l'indicateur de chargement
-    setIsRegeneratingTitle(prev => ({
+    setIsRegeneratingContent(prev => ({
       ...prev,
-      [titleKey]: true
+      [variationId]: true
+    }));
+    
+    setRegenerationProgress(prev => ({
+      ...prev,
+      [variationId]: 0
     }));
     
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     
     try {
-      // Trouver la variation correspondante
-      const variation = variations.find(v => v.id === variationId);
-      if (!variation) return;
+      // Simuler la progression pendant la génération
+      const progressInterval = setInterval(() => {
+        setRegenerationProgress(prev => {
+          const currentProgress = prev[variationId] || 0;
+          if (currentProgress >= 95) {
+            clearInterval(progressInterval);
+            return {
+              ...prev,
+              [variationId]: 95
+            };
+          }
+          return {
+            ...prev,
+            [variationId]: Math.min(currentProgress + 5, 95)
+          };
+        });
+      }, 500);
       
-      // Utiliser l'API existante pour générer un nouveau titre
-      const response = await fetch(`${apiUrl}/api/titles`, {
+      // Récupérer les données de la session pour obtenir les logos
+      const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}");
+      
+      // Préparer la variation sans le contenu existant
+      const { content, ...variationWithoutContent } = variations[variationIndex];
+      
+      const variationForRegeneration = {
+        ...variationWithoutContent,
+        logo: sessionData.logos && sessionData.logos[variationId] ? sessionData.logos[variationId] : null
+      };
+      
+      const response = await fetch(`${apiUrl}/api/generate-all-content`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          sujet: topic,
-          tone: tone,
-          additional_context: additionalContext,
-          avoid_context: avoidContext,
-          single_title: true  // Indiquer que nous voulons un seul titre
+          variations: [variationForRegeneration],
+          forceRegenerate: true
         }),
       });
+      
+      // Arrêter l'intervalle une fois la réponse reçue
+      clearInterval(progressInterval);
       
       if (!response.ok) {
         throw new Error(`Erreur: ${response.status}`);
@@ -229,238 +175,273 @@ export default function ContentPage() {
       
       const data = await response.json();
       
-      // Extraire le titre généré (prendre le premier si l'API renvoie plusieurs titres)
-      const newTitle = data.titles && data.titles.length > 0 ? data.titles[0] : null;
+      if (data.error) {
+        throw new Error(data.error);
+      }
       
-      if (newTitle) {
-        // Mettre à jour le titre spécifique
-        const newTitles = { ...titles };
-        const variationTitles = [...(newTitles[variationId] || [])];
-        variationTitles[index] = newTitle;
-        newTitles[variationId] = variationTitles;
-        
-        setTitles(newTitles);
+      // Mettre à jour la variation avec le contenu généré
+      if (data.variations && data.variations.length > 0) {
+        // Compléter la progression à 100%
+        setRegenerationProgress(prev => ({
+          ...prev,
+          [variationId]: 100
+        }));
         
         // Mettre à jour la session
-        const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}");
-        if (!sessionData.titles) {
-          sessionData.titles = {};
-        }
-        sessionData.titles[variationId] = variationTitles;
-        localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData));
+        const updatedSessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}");
+        
+        // Mettre à jour uniquement la variation spécifique
+        const updatedVariations = [...updatedSessionData.variations];
+        updatedVariations[variationIndex] = {
+          ...updatedVariations[variationIndex],
+          content: data.variations[0].content
+        };
+        
+        updatedSessionData.variations = updatedVariations;
+        localStorage.setItem(`session_${sessionId}`, JSON.stringify(updatedSessionData));
+        
+        // Mettre à jour l'état local
+        setVariations(updatedVariations);
+        
+        // Attendre un court instant pour montrer le 100%
+        setTimeout(() => {
+          setRegenerationProgress(prev => ({
+            ...prev,
+            [variationId]: 0
+          }));
+          
+          setIsRegeneratingContent(prev => ({
+            ...prev,
+            [variationId]: false
+          }));
+        }, 1000);
       }
-    } catch (error) {
-      console.error("Erreur lors de la régénération du titre:", error);
-      setError(`Une erreur s'est produite lors de la régénération du titre: ${error}`);
+    } catch (err) {
+      setError(`Une erreur s'est produite: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      // Réinitialiser l'état de chargement
-      setIsRegeneratingTitle(prev => ({
-        ...prev,
-        [titleKey]: false
-      }));
+      if (regenerationProgress[variationId] < 100) {
+        setRegenerationProgress(prev => ({
+          ...prev,
+          [variationId]: 0
+        }));
+      }
+      
+      setTimeout(() => {
+        setIsRegeneratingContent(prev => ({
+          ...prev,
+          [variationId]: false
+        }));
+      }, 1000);
     }
   };
 
+  // Fonction pour exporter le site au format WordPress
+  const exportWordPressTemplate = async (variationId: string) => {
+    if (!sessionId) return;
+    
+    setIsExporting(variationId);
+    
+    try {
+      // Récupérer les données de la variation
+      const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}");
+      const variation = sessionData.variations.find((v: any) => v.id === variationId);
+      
+      if (!variation) {
+        throw new Error("Variation non trouvée");
+      }
+      
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      
+      const response = await fetch(`${apiUrl}/api/export-wordpress-template`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          variation_id: variationId,
+          variation_data: variation
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Erreur: ${response.status}`);
+      }
+      
+      // Télécharger le fichier
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${variation.title}_export.xml`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+    } catch (err) {
+      console.error("Erreur lors de l'exportation:", err);
+      toast.error("Impossible d'exporter le template WordPress");
+    } finally {
+      setIsExporting("");
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
-      <div className="container max-w-4xl mx-auto px-4 py-12">
-        <Card className="border-none shadow-xl bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm">
-          <CardHeader className="p-6 border-b">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <Link
-                  href="/logos"
-                  className="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 transition-colors"
-                >
-                  <ArrowLeft className="h-5 w-5" />
-                  <span className="sr-only">Retour aux logos</span>
-                </Link>
-                <h1 className="text-2xl md:text-3xl font-bold">Création du Contenu</h1>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-500 dark:text-slate-400">Étape 3/3</span>
-              </div>
-            </div>
-          </CardHeader>
+      <div className="container max-w-6xl mx-auto px-4 py-12">
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-2">
+            <Link
+              href="/logos"
+              className="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5" />
+              <span className="sr-only">Retour à l'étape 2</span>
+            </Link>
+            <h1 className="text-2xl md:text-3xl font-bold">Contenu des Sites</h1>
+          </div>
           
-          <CardContent className="p-6">
-            {error && (
-              <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg text-red-600 dark:text-red-400 mb-6">
-                {error}
-              </div>
-            )}
-            
-            <div className="space-y-6">
-              <div className="space-y-4">
-                <label className="block text-sm font-medium">Sélectionnez un site web</label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {variations.map((variation) => (
-                    <div
-                      key={variation.id}
-                      className={`border rounded-lg p-4 cursor-pointer transition-colors ${
-                        selectedVariation === variation.id
-                          ? "border-purple-500 bg-purple-50 dark:bg-purple-900/20"
-                          : "bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800"
-                      }`}
-                      onClick={() => setSelectedVariation(variation.id)}
-                    >
-                      <div className="flex flex-col items-center">
-                        {logos[variation.id] && (
-                          <div className="w-16 h-16 mb-2">
-                            <img
-                              src={logos[variation.id]}
-                              alt={`Logo pour ${variation.title}`}
-                              className="w-full h-full object-contain"
-                            />
-                          </div>
-                        )}
-                        <h3 className="font-medium text-center">{variation.title}</h3>
-                      </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-500 dark:text-slate-400">Étape 3/3</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.push('/logos')}
+              className="flex items-center gap-1"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Retour aux logos
+            </Button>
+          </div>
+        </div>
+        
+        {error && (
+          <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg text-red-600 dark:text-red-400 mb-6">
+            {error}
+          </div>
+        )}
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {variations.map((variation, variationIndex) => (
+            <Card key={variationIndex} className="overflow-hidden border-none shadow-lg bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm">
+              <CardHeader className="p-6 border-b relative">
+                <h2 className="text-xl font-bold">{variation.title}</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">{variation.description}</p>
+                
+                {/* Bouton de régénération */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute top-4 right-4 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  onClick={() => regenerateSiteContent(variationIndex)}
+                  disabled={isRegeneratingContent[variation.id]}
+                >
+                  {isRegeneratingContent[variation.id] ? (
+                    <div className="relative h-6 w-6">
+                      <svg className="h-6 w-6" viewBox="0 0 24 24">
+                        <circle 
+                          className="text-slate-200 dark:text-slate-700" 
+                          strokeWidth="2" 
+                          stroke="currentColor" 
+                          fill="transparent" 
+                          r="10" 
+                          cx="12" 
+                          cy="12" 
+                        />
+                        <circle 
+                          className="text-indigo-600 dark:text-indigo-400" 
+                          strokeWidth="2" 
+                          strokeLinecap="round" 
+                          stroke="currentColor" 
+                          fill="transparent" 
+                          r="10" 
+                          cx="12" 
+                          cy="12" 
+                          strokeDasharray={`${2 * Math.PI * 10}`}
+                          strokeDashoffset={`${2 * Math.PI * 10 * (1 - (regenerationProgress[variation.id] || 0) / 100)}`}
+                          style={{ transition: "stroke-dashoffset 0.5s ease" }}
+                        />
+                      </svg>
                     </div>
-                  ))}
-                </div>
-              </div>
+                  ) : (
+                    <RefreshCw className="h-5 w-5 font-bold stroke-[2.5px]" />
+                  )}
+                  <span className="sr-only">Régénérer le contenu</span>
+                </Button>
+              </CardHeader>
               
-              {selectedVariation && (
-                <div className="space-y-6 pt-4 border-t">
-                  <h2 className="text-xl font-semibold">
-                    Paramètres de génération pour {variations.find(v => v.id === selectedVariation)?.title}
-                  </h2>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-4">
-                      <label className="block text-sm font-medium">Ton des articles</label>
-                      <Select value={tone} onValueChange={setTone}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Choisir un ton" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="standard">Standard</SelectItem>
-                          <SelectItem value="professionnel">Professionnel</SelectItem>
-                          <SelectItem value="amical">Amical</SelectItem>
-                          <SelectItem value="informatif">Informatif</SelectItem>
-                          <SelectItem value="persuasif">Persuasif</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    
-                    <div className="space-y-4">
-                      <label className="block text-sm font-medium">Contexte supplémentaire (optionnel)</label>
-                      <Textarea
-                        value={additionalContext}
-                        onChange={(e) => setAdditionalContext(e.target.value)}
-                        placeholder="Informations supplémentaires à inclure..."
+              <CardContent className="p-6">
+                {/* Logo du site */}
+                <div className="mb-6">
+                  {variation.logo ? (
+                    <div className="bg-white dark:bg-slate-800 rounded-lg p-4 flex items-center justify-center h-[120px]">
+                      <img 
+                        src={variation.logo} 
+                        alt={`Logo pour ${variation.title}`} 
+                        className="max-h-full max-w-full object-contain"
                       />
                     </div>
-                    
-                    <div className="space-y-4">
-                      <label className="block text-sm font-medium">Éléments à éviter (optionnel)</label>
-                      <Textarea
-                        value={avoidContext}
-                        onChange={(e) => setAvoidContext(e.target.value)}
-                        placeholder="Sujets ou éléments à éviter..."
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="pt-4">
-                    <Button
-                      onClick={generateTitles}
-                      disabled={isGenerating}
-                      className="w-full bg-gradient-to-r from-purple-600 to-blue-500 hover:from-purple-700 hover:to-blue-600"
-                    >
-                      {isGenerating ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Génération des titres...
-                        </>
-                      ) : (
-                        "Générer des titres d'articles"
-                      )}
-                    </Button>
-                  </div>
-                  
-                  {selectedVariation && titles[selectedVariation] && titles[selectedVariation].length > 0 && (
-                    <div className="pt-6 border-t mt-6">
-                      <h3 className="text-lg font-medium mb-4">Titres générés</h3>
-                      <div className="space-y-3">
-                        {titles[selectedVariation].map((title, index) => {
-                          const titleKey = `${selectedVariation}_${index}`;
-                          return (
-                            <div
-                              key={index}
-                              className="p-3 border rounded-lg bg-slate-50 dark:bg-slate-800/50"
-                            >
-                              {editingTitleIndex === titleKey ? (
-                                <div className="flex items-center gap-2">
-                                  <span className="font-bold text-slate-400">{index + 1}.</span>
-                                  <Input
-                                    value={editedTitle}
-                                    onChange={(e) => setEditedTitle(e.target.value)}
-                                    className="flex-1"
-                                  />
-                                  <Button size="sm" onClick={saveEditedTitle}>
-                                    Enregistrer
-                                  </Button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-bold text-slate-400">{index + 1}.</span>
-                                    <p>{title}</p>
-                                  </div>
-                                  <div className="flex gap-2">
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => startEditingTitle(selectedVariation, index)}
-                                    >
-                                      <Edit2 className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => regenerateTitle(selectedVariation, index)}
-                                      disabled={isRegeneratingTitle[titleKey]}
-                                    >
-                                      {isRegeneratingTitle[titleKey] ? (
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                      ) : (
-                                        <RefreshCw className="h-4 w-4" />
-                                      )}
-                                    </Button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                  ) : (
+                    <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-4 flex items-center justify-center h-[120px]">
+                      <span className="text-slate-400 dark:text-slate-500">Logo non disponible</span>
                     </div>
                   )}
                 </div>
-              )}
-            </div>
-          </CardContent>
-          
-          <CardFooter className="p-6 border-t flex justify-between">
-            <Button variant="outline" onClick={() => router.push("/logos")}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Retour aux logos
-            </Button>
-            
-            <Button
-              onClick={navigateToArticles}
-              className="bg-gradient-to-r from-purple-600 to-blue-500 hover:from-purple-700 hover:to-blue-600"
-              disabled={!selectedVariation || !titles[selectedVariation] || titles[selectedVariation].length === 0}
-            >
-              Continuer vers les articles
-              <ArrowRight className="h-4 w-4 ml-2" />
-            </Button>
-          </CardFooter>
-        </Card>
+                
+                {/* Articles */}
+                <div>
+                  <h3 className="text-lg font-semibold mb-3">Articles</h3>
+                  
+                  {variation.content && variation.content.articles && variation.content.articles.length > 0 ? (
+                    <ul className="space-y-2">
+                      {variation.content.articles.map((article: any, articleIndex: number) => (
+                        <li key={articleIndex}>
+                          <button
+                            onClick={() => navigateToArticle(variationIndex, articleIndex)}
+                            className="w-full text-left p-3 bg-slate-50 dark:bg-slate-800 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center gap-2"
+                          >
+                            <FileText className="h-4 w-4 text-blue-500 dark:text-blue-400 flex-shrink-0" />
+                            <span className="text-blue-600 dark:text-blue-400 font-medium">{article.title}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="text-center p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                      <p className="text-slate-500 dark:text-slate-400">Aucun article disponible</p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+              
+              <CardFooter className="p-6 border-t">
+                <Button
+                  onClick={() => exportWordPressTemplate(variation.id)}
+                  disabled={isExporting === variation.id}
+                  className="w-full"
+                >
+                  {isExporting === variation.id ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Exportation...
+                    </>
+                  ) : (
+                    "Voir le site complet"
+                  )}
+                </Button>
+              </CardFooter>
+            </Card>
+          ))}
+        </div>
       </div>
     </div>
-  ) 
+  )
 } 

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardContent, CardFooter } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
-import { ArrowLeft, Check, ImageIcon, RefreshCw, X, Loader2, Download, Share, Wand2, Globe } from "lucide-react"
+import { ArrowLeft, Check, ImageIcon, RefreshCw, X, Loader2, Download, Share, Wand2, Globe, Upload } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import ReactMarkdown from 'react-markdown'
 import { jsPDF } from "jspdf"
@@ -36,16 +36,21 @@ export default function ArticleDetailPage() {
   const [currentLanguage, setCurrentLanguage] = useState("fr")
   const [isTranslating, setIsTranslating] = useState(false)
   const [sources, setSources] = useState<string[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [articleImage, setArticleImage] = useState<string | null>(null)
   
   const articleContentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!id) return
     
+    console.log(`Page article chargée avec ID: ${id}`)
+    
     // Récupérer l'ID de la session actuelle
     const currentSessionId = localStorage.getItem("currentSession")
     
     if (!currentSessionId) {
+      console.log("Pas de session trouvée, redirection vers la page d'accueil")
       router.push("/")
       return
     }
@@ -54,19 +59,15 @@ export default function ArticleDetailPage() {
     const sessionData = JSON.parse(localStorage.getItem(`session_${currentSessionId}`) || "{}")
     
     if (!sessionData) {
+      console.log("Pas de données de session trouvées, redirection vers la page d'accueil")
       router.push("/")
-      return
-    }
-    
-    // Vérifier si une variation est sélectionnée
-    if (!sessionData.selectedVariation) {
-      router.push("/articles")
       return
     }
     
     // Vérifier si des articles existent
     if (!sessionData.articles) {
-      router.push("/articles")
+      console.log("Pas d'articles trouvés, redirection vers la page de contenu")
+      router.push("/content")
       return
     }
     
@@ -74,108 +75,121 @@ export default function ArticleDetailPage() {
     
     // Vérifier si l'article spécifique existe
     if (!sessionData.articles[articleIndex]) {
-      router.push("/articles")
+      console.log(`Article avec ID ${articleIndex} non trouvé, redirection vers la page de contenu`)
+      router.push("/content")
       return
     }
     
-    setSessionId(currentSessionId)
-    setTopic(sessionData.topic || "")
-    setTone(sessionData.tone || "")
-    setAdditionalContext(sessionData.additionalContext || "")
-    setAvoidContext(sessionData.avoidContext || "")
+    console.log(`Article trouvé: ${sessionData.articles[articleIndex].title}`)
     
+    setSessionId(currentSessionId)
     setTitle(sessionData.articles[articleIndex].title)
     setContent(sessionData.articles[articleIndex].content)
     setEditedContent(sessionData.articles[articleIndex].content)
+    setIsLoading(false)
     
     // Récupérer les sources si elles existent
     if (sessionData.articles[articleIndex].sources) {
       setSources(sessionData.articles[articleIndex].sources)
     }
     
-    // Générer un prompt pour l'image basé sur le titre
-    setImagePrompt(`Illustration pour un article intitulé "${sessionData.articles[articleIndex].title}" sur le sujet ${sessionData.topic}`)
-    
-    // Vérifier si l'article est déjà validé
-    if (sessionData.articles[articleIndex].isValidated) {
-      setIsValidated(true)
-    }
-    
-    // Récupérer l'image si elle existe
+    // Récupérer l'image de l'article si elle existe
     if (sessionData.articles[articleIndex].image) {
-      setImage(sessionData.articles[articleIndex].image)
+      setArticleImage(sessionData.articles[articleIndex].image)
+    } else {
+      // Générer automatiquement une image si aucune n'existe
+      setTimeout(() => {
+        generateArticleImage()
+      }, 500)
     }
   }, [id, router])
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!sessionId) return
-    
-    const file = e.target.files?.[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onload = (event) => {
-        const imageData = event.target?.result as string
-        setImage(imageData)
-        
-        // Sauvegarder l'image dans la session
-        const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}")
-        if (sessionData.articles && sessionData.articles[id]) {
-          sessionData.articles[id].image = imageData
-          localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData))
-        }
-      }
-      reader.readAsDataURL(file)
-    }
-  }
-
-  const handleGenerateImage = async () => {
-    if (!sessionId) return
+  const generateArticleImage = async () => {
+    if (!sessionId || !title) return
     
     setIsGeneratingImage(true)
-    setError(null)
     
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
     
     try {
-      const response = await fetch(`${apiUrl}/api/generate-image`, {
+      // Générer un prompt pour l'image basé sur le titre de l'article
+      const defaultPrompt = `Illustration pour un article intitulé "${title}"`
+      const prompt = imagePrompt || defaultPrompt
+      
+      const response = await fetch(`${apiUrl}/api/generate-article-image`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          prompt: imagePrompt,
+          prompt: prompt,
+          title: title
         }),
       })
-
+      
       if (!response.ok) {
         throw new Error(`Erreur: ${response.status}`)
       }
-
+      
       const data = await response.json()
       
-      // Télécharger l'image depuis l'URL
-      const imageResponse = await fetch(data.image_url)
-      const blob = await imageResponse.blob()
-      const reader = new FileReader()
+      if (data.error) {
+        throw new Error(data.error)
+      }
       
-      reader.onload = (event) => {
-        const imageData = event.target?.result as string
-        setImage(imageData)
+      // Mettre à jour l'image de l'article
+      if (data.imageUrl) {
+        setArticleImage(data.imageUrl)
         
-        // Sauvegarder l'image dans la session
+        // Mettre à jour la session
         const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}")
-        if (sessionData.articles && sessionData.articles[id]) {
-          sessionData.articles[id].image = imageData
+        
+        if (!sessionData.articles) {
+          sessionData.articles = []
+        }
+        
+        const articleIndex = Number(id)
+        
+        if (sessionData.articles[articleIndex]) {
+          sessionData.articles[articleIndex].image = data.imageUrl
           localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData))
         }
       }
-      
-      reader.readAsDataURL(blob)
     } catch (err) {
-      setError(`Une erreur s'est produite lors de la génération de l'image: ${err instanceof Error ? err.message : String(err)}`)
+      console.error("Erreur lors de la génération de l'image:", err)
     } finally {
       setIsGeneratingImage(false)
     }
+  }
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return
+    
+    const file = e.target.files[0]
+    const reader = new FileReader()
+    
+    reader.onloadend = () => {
+      const base64String = reader.result as string
+      setArticleImage(base64String)
+      
+      // Mettre à jour la session
+      if (sessionId) {
+        const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}")
+        
+        if (!sessionData.articles) {
+          sessionData.articles = []
+        }
+        
+        const articleIndex = Number(id)
+        
+        if (sessionData.articles[articleIndex]) {
+          sessionData.articles[articleIndex].image = base64String
+          localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData))
+        }
+      }
+    }
+    
+    reader.readAsDataURL(file)
   }
 
   const handleEdit = () => {
@@ -390,6 +404,24 @@ export default function ArticleDetailPage() {
     }
   }
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg text-red-600 dark:text-red-400">
+          {error}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
       <div className="container max-w-4xl mx-auto px-4 py-12">
@@ -495,25 +527,33 @@ export default function ArticleDetailPage() {
 
               <TabsContent value="preview" className="mt-0">
                 <div className="space-y-6">
-                  <div className="flex flex-col gap-4">
-                    <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-4">
-                      <h3 className="font-medium mb-2">Image de l'article</h3>
-                      
-                      {image ? (
-                        <div className="relative aspect-video bg-slate-200 dark:bg-slate-700 rounded-lg overflow-hidden">
-                          <img
-                            src={image}
-                            alt={title}
-                            className="w-full h-full object-cover"
-                          />
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="absolute top-2 right-2 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm"
-                            onClick={() => document.getElementById('image-upload')?.click()}
-                          >
-                            Changer
-                          </Button>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-lg font-medium">Image de l'article</h2>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={generateArticleImage}
+                          disabled={isGeneratingImage}
+                        >
+                          {isGeneratingImage ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Génération...
+                            </>
+                          ) : (
+                            <>
+                              <RefreshCw className="mr-2 h-4 w-4" />
+                              Régénérer
+                            </>
+                          )}
+                        </Button>
+                        <label htmlFor="image-upload" className="cursor-pointer">
+                          <div className="flex items-center gap-1 text-sm px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+                            <Upload className="h-4 w-4" />
+                            Importer
+                          </div>
                           <input
                             id="image-upload"
                             type="file"
@@ -521,58 +561,42 @@ export default function ArticleDetailPage() {
                             className="hidden"
                             onChange={handleImageUpload}
                           />
-                        </div>
+                        </label>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <label className="text-sm text-slate-500 dark:text-slate-400">Prompt pour l'image</label>
+                      <div className="flex gap-2">
+                        <Input
+                          value={imagePrompt}
+                          onChange={(e) => setImagePrompt(e.target.value)}
+                          placeholder={`Illustration pour un article intitulé "${title}"`}
+                          className="flex-1"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={generateArticleImage}
+                          disabled={isGeneratingImage}
+                        >
+                          Générer
+                        </Button>
+                      </div>
+                    </div>
+                    
+                    <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-4 flex items-center justify-center min-h-[200px]">
+                      {articleImage ? (
+                        <img
+                          src={articleImage}
+                          alt={`Image pour ${title}`}
+                          className="max-h-[300px] max-w-full object-contain rounded-md"
+                        />
                       ) : (
-                        <div className="space-y-4">
-                          <div className="flex flex-col gap-2">
-                            <label className="text-sm">Prompt pour l'image</label>
-                            <div className="flex gap-2">
-                              <Input
-                                value={imagePrompt}
-                                onChange={(e) => setImagePrompt(e.target.value)}
-                                placeholder="Décrivez l'image que vous souhaitez générer..."
-                                className="flex-1"
-                              />
-                              <Button
-                                onClick={handleGenerateImage}
-                                disabled={isGeneratingImage || !imagePrompt}
-                                className="whitespace-nowrap"
-                              >
-                                {isGeneratingImage ? (
-                                  <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Génération...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Wand2 className="mr-2 h-4 w-4" />
-                                    Générer
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center justify-center h-48 bg-slate-200 dark:bg-slate-700 rounded-lg">
-                            <div className="flex flex-col items-center text-slate-500 dark:text-slate-400">
-                              <ImageIcon className="h-12 w-12 mb-2" />
-                              <span>Aucune image</span>
-                              <Button
-                                variant="link"
-                                size="sm"
-                                onClick={() => document.getElementById('image-upload')?.click()}
-                              >
-                                Télécharger une image
-                              </Button>
-                              <input
-                                id="image-upload"
-                                type="file"
-                                accept="image/*"
-                                className="hidden"
-                                onChange={handleImageUpload}
-                              />
-                            </div>
-                          </div>
+                        <div className="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500">
+                          <ImageIcon className="h-12 w-12 mb-2" />
+                          <span>Aucune image</span>
+                          <span className="text-sm">Télécharger une image</span>
                         </div>
                       )}
                     </div>
@@ -663,23 +687,6 @@ export default function ArticleDetailPage() {
                     <X className="h-4 w-4" />
                     Reprendre l'édition
                   </Button>
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={handleExportJSON}
-                      variant="outline"
-                      className="flex items-center gap-2"
-                    >
-                      <Download className="h-4 w-4" />
-                      JSON
-                    </Button>
-                    <Button
-                      onClick={handleExportPDF}
-                      className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-500 hover:from-blue-700 hover:to-indigo-600"
-                    >
-                      <Download className="h-4 w-4" />
-                      PDF
-                    </Button>
-                  </div>
                 </>
               )}
             </div>

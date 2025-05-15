@@ -17,6 +17,11 @@ import base64
 from PIL import Image
 import traceback
 import random
+import tempfile
+import datetime
+import xml.etree.ElementTree as ET
+from xml.dom import minidom
+from starlette.background import BackgroundTask
 
 # Importation conditionnelle des bibliothèques LLM
 try:
@@ -76,6 +81,9 @@ class ArticleRequest(BaseModel):
 
 class ArticleResponse(BaseModel):
     content: str
+
+class ThemeAnalysisRequest(BaseModel):
+    theme: str
 
 # Fonction pour générer des titres
 def generate_titles_with_llm(sujet: str, tone: str, additional_context: str, avoid_context: str) -> List[str]:
@@ -730,6 +738,352 @@ async def generate_logos(request: dict = Body(...)):
         print(f"Erreur lors de la génération des logos: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/analyze-theme-color")
+async def analyze_theme_color(request: ThemeAnalysisRequest):
+    try:
+        theme = request.theme
+        
+        if not api_key:
+            # Fallback si pas de clé API
+            return {"colorScheme": get_automatic_color_scheme(theme)}
+        
+        try:
+            llm = ChatOpenAI(api_key=api_key, model_name=model, temperature=0.3)
+            
+            prompt = f"""
+            Analyse le thème suivant: "{theme}"
+            
+            Détermine la palette de couleurs la plus appropriée parmi les options suivantes:
+            - vert: pour les thèmes liés à la nature, l'environnement, la nourriture, la santé naturelle
+            - bleu: pour les thèmes liés au voyage, à la technologie professionnelle, à la santé médicale, à l'eau
+            - violet: pour les thèmes liés à la technologie créative, l'innovation, le luxe
+            - rouge: pour les thèmes liés à la mode, la beauté, la passion, l'urgence
+            - orange: pour les thèmes liés à la créativité, l'enthousiasme, la chaleur
+            - jaune: pour les thèmes liés à l'optimisme, la jeunesse, l'énergie
+            
+            Réponds uniquement avec le nom de la palette (vert, bleu, violet, rouge, orange ou jaune) sans aucun autre texte.
+            """
+            
+            response = llm.invoke([HumanMessage(content=prompt)])
+            
+            # Extraire la réponse et la nettoyer
+            color_scheme = response.content.strip().lower()
+            
+            # Vérifier si la réponse est valide
+            valid_schemes = ["vert", "bleu", "violet", "rouge", "orange", "jaune"]
+            if color_scheme not in valid_schemes:
+                # Si la réponse n'est pas valide, utiliser la méthode de secours
+                color_scheme = get_automatic_color_scheme(theme)
+            
+            return {"colorScheme": color_scheme}
+        except Exception as e:
+            print(f"Erreur lors de l'analyse du thème avec LLM: {str(e)}")
+            return {"colorScheme": get_automatic_color_scheme(theme)}
+    except Exception as e:
+        print(f"Erreur lors de l'analyse du thème: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Fonction de secours pour déterminer la palette de couleurs
+def get_automatic_color_scheme(theme: str) -> str:
+    theme_lower = theme.lower()
+    
+    if any(keyword in theme_lower for keyword in ["nourriture", "food", "restaurant", "bio", "café", "cuisine"]):
+        return "vert"
+    elif any(keyword in theme_lower for keyword in ["voyage", "travel", "tourisme", "aventure", "destination"]):
+        return "bleu"
+    elif any(keyword in theme_lower for keyword in ["tech", "digital", "innovation", "startup", "ai", "ia"]):
+        return "violet"
+    elif any(keyword in theme_lower for keyword in ["santé", "health", "médical", "clinique", "hôpital"]):
+        return "bleu"
+    elif any(keyword in theme_lower for keyword in ["mode", "fashion", "beauté", "beauty", "luxe", "style"]):
+        return "rouge"
+    elif any(keyword in theme_lower for keyword in ["créatif", "creative", "art", "design", "studio"]):
+        return "orange"
+    elif any(keyword in theme_lower for keyword in ["enfant", "kid", "école", "school", "éducation", "formation"]):
+        return "jaune"
+    else:
+        return "default"
+
+@app.post("/api/generate-all-content")
+async def generate_all_content(request: dict = Body(...)):
+    try:
+        print(f"Requête reçue pour générer du contenu pour tous les sites")
+        variations = request.get("variations", [])
+        force_regenerate = request.get("forceRegenerate", False)
+        
+        if not variations:
+            return {"error": "Aucune variation fournie"}
+        
+        print(f"Nombre de variations à traiter: {len(variations)}")
+        print(f"Régénération forcée: {force_regenerate}")
+        
+        # Pour chaque variation, générer 5 articles
+        for i, variation in enumerate(variations):
+            print(f"Traitement de la variation {i+1}/{len(variations)}: {variation.get('title', 'Sans titre')}")
+            
+            # Conserver le logo s'il existe
+            logo = variation.get("logo")
+            
+            # Initialiser la structure de contenu si elle n'existe pas
+            if "content" not in variation:
+                variation["content"] = {}
+            
+            # Toujours régénérer les articles si force_regenerate est True
+            if force_regenerate or "articles" not in variation["content"]:
+                variation["content"]["articles"] = []
+            
+            # Générer 5 articles si aucun n'existe déjà ou si force_regenerate est True
+            if force_regenerate or len(variation["content"].get("articles", [])) == 0:
+                # Récupérer les informations de la variation
+                site_name = variation.get("title", "Site")
+                site_description = variation.get("description", "")
+                
+                # Générer 5 articles
+                for j in range(5):
+                    try:
+                        print(f"Génération de l'article {j+1}/5 pour {site_name}")
+                        
+                        # Générer un titre d'article
+                        title_prompt = f"""
+                        Génère un titre d'article accrocheur pour un site web nommé '{site_name}'.
+                        Description du site: {site_description}
+                        Le titre doit être concis (moins de 10 mots) et attrayant.
+                        """
+                        
+                        title = ""
+                        if api_key:
+                            llm = ChatOpenAI(api_key=api_key, model_name=model, temperature=0.7)
+                            response = llm.invoke([HumanMessage(content=title_prompt)])
+                            title = response.content.strip().replace('"', '')
+                        else:
+                            # Fallback pour les tests
+                            title = f"Article {j+1} pour {site_name}"
+                        
+                        # Générer le contenu de l'article
+                        content_prompt = f"""
+                        Écris un article complet pour un site web nommé '{site_name}' avec le titre '{title}'.
+                        
+                        Description du site: {site_description}
+                        
+                        L'article doit:
+                        - Être informatif et engageant
+                        - Contenir environ 300 mots
+                        - Être structuré avec une introduction, un développement et une conclusion
+                        - Être adapté au thème du site
+                        """
+                        
+                        content = ""
+                        if api_key:
+                            llm = ChatOpenAI(api_key=api_key, model_name=model, temperature=0.7)
+                            response = llm.invoke([HumanMessage(content=content_prompt)])
+                            content = response.content.strip()
+                        else:
+                            # Fallback pour les tests
+                            content = f"""
+                            Ceci est un article généré automatiquement pour {site_name}.
+                            
+                            Introduction:
+                            Bienvenue dans cet article sur {title}. Nous allons explorer ce sujet passionnant.
+                            
+                            Développement:
+                            Voici quelques points importants à considérer sur ce sujet.
+                            - Premier point intéressant
+                            - Deuxième aspect à explorer
+                            - Troisième élément à prendre en compte
+                            
+                            Conclusion:
+                            En résumé, nous avons vu plusieurs aspects importants de {title}.
+                            """
+                        
+                        # Ajouter l'article à la liste
+                        variation["content"]["articles"].append({
+                            "title": title,
+                            "content": content
+                        })
+                        
+                    except Exception as e:
+                        print(f"Erreur lors de la génération de l'article {j+1}: {str(e)}")
+                        traceback.print_exc()
+                        
+                        # Ajouter un article par défaut en cas d'erreur
+                        variation["content"]["articles"].append({
+                            "title": f"Article {j+1} pour {site_name}",
+                            "content": f"Contenu par défaut pour l'article {j+1}. Une erreur s'est produite lors de la génération."
+                        })
+            
+            # S'assurer que le logo est conservé
+            if logo:
+                variation["logo"] = logo
+        
+        print("Génération de contenu terminée avec succès")
+        return {"variations": variations}
+    
+    except Exception as e:
+        print(f"Erreur lors de la génération du contenu: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/generate-article-image")
+async def generate_article_image(request: dict = Body(...)):
+    try:
+        print(f"Requête reçue pour générer une image d'article")
+        prompt = request.get("prompt", "")
+        title = request.get("title", "")
+        
+        if not prompt and not title:
+            return {"error": "Aucun prompt ou titre fourni"}
+        
+        # Utiliser le titre comme prompt si aucun prompt n'est fourni
+        if not prompt:
+            prompt = f"Illustration pour un article intitulé '{title}'"
+        
+        print(f"Génération d'une image avec le prompt: {prompt}")
+        
+        # Utiliser l'API fal.ai pour générer l'image
+        try:
+            # Configuration de l'API fal.ai
+            fal_key = os.getenv("FAL_KEY", "")
+            fal_secret = os.getenv("FAL_SECRET", "")
+            
+            if not fal_key or not fal_secret:
+                return {"error": "Clés d'API fal.ai non configurées"}
+            
+            # Appel à l'API fal.ai
+            response = requests.post(
+                "https://api.fal.ai/text-to-image",
+                json={
+                    "prompt": prompt,
+                    "negative_prompt": "low quality, blurry, distorted, deformed",
+                    "width": 768,
+                    "height": 512,
+                    "num_images": 1,
+                    "model": "realistic-vision-v5.1"
+                },
+                headers={
+                    "Authorization": f"Key {fal_key}:{fal_secret}",
+                    "Content-Type": "application/json"
+                }
+            )
+            
+            if response.status_code != 200:
+                print(f"Erreur lors de l'appel à fal.ai: {response.status_code}")
+                print(response.text)
+                return {"error": f"Erreur lors de la génération de l'image: {response.status_code}"}
+            
+            data = response.json()
+            
+            # Extraire l'URL de l'image générée
+            image_url = data.get("images", [{}])[0].get("url", "")
+            
+            if not image_url:
+                return {"error": "Aucune image générée"}
+            
+            print(f"Image générée avec succès: {image_url}")
+            
+            return {"imageUrl": image_url}
+            
+        except Exception as e:
+            print(f"Erreur lors de la génération de l'image avec fal.ai: {str(e)}")
+            traceback.print_exc()
+            
+            # Utiliser une image de secours si fal.ai échoue
+            return {"error": f"Erreur lors de la génération de l'image: {str(e)}"}
+        
+    except Exception as e:
+        print(f"Erreur lors de la génération de l'image d'article: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/export-wordpress-template")
+async def export_wordpress_template(request: dict = Body(...)):
+    try:
+        print(f"Requête reçue pour exporter un template WordPress")
+        variation_id = request.get("variation_id")
+        variation_data = request.get("variation_data", {})
+        
+        if not variation_data:
+            return {"error": "Données de variation non fournies"}
+        
+        # Générer le contenu WXR
+        wxr_content = generate_simple_wxr(variation_data)
+        
+        # Créer un fichier temporaire
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xml") as temp_file:
+            temp_file_path = temp_file.name
+            temp_file.write(wxr_content.encode('utf-8'))
+        
+        # Retourner le fichier pour téléchargement
+        return FileResponse(
+            path=temp_file_path,
+            filename=f"{variation_data.get('title', 'site')}_export.xml",
+            media_type="application/xml",
+            background=BackgroundTask(lambda: os.unlink(temp_file_path))
+        )
+    
+    except Exception as e:
+        print(f"Erreur lors de l'exportation: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+def generate_simple_wxr(variation_data):
+    """Génère un fichier WXR simplifié"""
+    
+    # Créer la structure XML de base
+    rss = ET.Element("rss")
+    rss.set("version", "2.0")
+    rss.set("xmlns:excerpt", "http://wordpress.org/export/1.2/excerpt/")
+    rss.set("xmlns:content", "http://purl.org/rss/1.0/modules/content/")
+    rss.set("xmlns:wfw", "http://wellformedweb.org/CommentAPI/")
+    rss.set("xmlns:dc", "http://purl.org/dc/elements/1.1/")
+    rss.set("xmlns:wp", "http://wordpress.org/export/1.2/")
+    
+    channel = ET.SubElement(rss, "channel")
+    
+    # Informations du site
+    title = ET.SubElement(channel, "title")
+    title.text = variation_data.get("title", "Site généré")
+    
+    description = ET.SubElement(channel, "description")
+    description.text = variation_data.get("description", "")
+    
+    language = ET.SubElement(channel, "language")
+    language.text = "fr-FR"
+    
+    wxr_version = ET.SubElement(channel, "wp:wxr_version")
+    wxr_version.text = "1.2"
+    
+    # Ajouter les articles
+    articles = variation_data.get("content", {}).get("articles", [])
+    
+    for i, article in enumerate(articles):
+        item = ET.SubElement(channel, "item")
+        
+        # Titre de l'article
+        item_title = ET.SubElement(item, "title")
+        item_title.text = article.get("title", "")
+        
+        # Contenu de l'article
+        content_encoded = ET.SubElement(item, "content:encoded")
+        content_encoded.text = f"<![CDATA[{article.get('content', '')}]]>"
+        
+        # Type de post
+        post_type = ET.SubElement(item, "wp:post_type")
+        post_type.text = "post"
+        
+        # Statut de publication
+        status = ET.SubElement(item, "wp:status")
+        status.text = "publish"
+        
+        # ID unique pour l'article
+        post_id = ET.SubElement(item, "wp:post_id")
+        post_id.text = str(i + 1)
+    
+    # Convertir l'arbre XML en chaîne formatée
+    rough_string = ET.tostring(rss, 'utf-8')
+    reparsed = minidom.parseString(rough_string)
+    return reparsed.toprettyxml(indent="  ")
 
 if __name__ == "__main__":
     print("Démarrage du serveur API...")
