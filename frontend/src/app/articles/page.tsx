@@ -114,7 +114,9 @@ export default function ArticlesPage() {
           tone: tone,
           additional_context: sessionData.additionalContext || "",
           avoid_context: sessionData.avoidContext || "",
-          website: variationName
+          website: variationName,
+          session_id: sessionId,
+          article_index: index
         }),
       })
 
@@ -147,6 +149,12 @@ export default function ArticlesPage() {
       // Ajouter les sources si elles existent
       if (data.sources) {
         sessionData.articles[index].sources = data.sources
+      }
+      
+      // Ajouter l'image si elle existe
+      if (data.imageUrl) {
+        sessionData.articles[index].image = data.imageUrl
+        console.log("Image ajoutée à l'article:", data.imageUrl)
       }
       
       localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData))
@@ -309,6 +317,20 @@ export default function ArticlesPage() {
                         )}
                       </div>
                     </div>
+                    {generatedArticles[index] && (
+                      <div className="mt-2 h-16 w-16 rounded overflow-hidden">
+                        <img 
+                          src={JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}")?.articles?.[index]?.image} 
+                          alt={`Image pour ${title}`}
+                          className="h-full w-full object-cover"
+                          onError={(e) => {
+                            console.log("Erreur de chargement d'image:", e);
+                            // Masquer l'image en cas d'erreur de chargement
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardFooter } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { ArrowLeft, ArrowRight, Loader2, RefreshCw, ImageIcon } from "lucide-react"
+import { ArrowLeft, ArrowRight, Loader2, RefreshCw, ImageIcon, Download, Upload } from "lucide-react"
 import Link from "next/link"
 
 export default function LogosPage() {
@@ -20,7 +20,6 @@ export default function LogosPage() {
   const [isGeneratingLogo, setIsGeneratingLogo] = useState<Record<string, boolean>>({})
   const [isGeneratingAllContent, setIsGeneratingAllContent] = useState(false)
   const [contentExists, setContentExists] = useState(false)
-  const [isFirstVisit, setIsFirstVisit] = useState(true)
   const [generationProgress, setGenerationProgress] = useState(0)
   const [generationStatus, setGenerationStatus] = useState("")
 
@@ -47,17 +46,16 @@ export default function LogosPage() {
     // Initialiser les descriptions de logo
     const initialDescriptions: Record<string, string> = {}
     sessionData.variations.forEach((variation: any) => {
-      initialDescriptions[variation.id] = `Logo pour "${variation.title}" avec un style ${variation.style.toLowerCase()}`
+      initialDescriptions[variation.id] = `Logo pour \"${variation.title}\" avec un style ${variation.style.toLowerCase()}`
     })
     setLogoDescriptions(initialDescriptions)
     
     // Récupérer les logos s'ils existent déjà
     if (sessionData.logos) {
       setLogos(sessionData.logos)
-      setIsFirstVisit(false) // Ce n'est plus la première visite si des logos existent déjà
     } else {
-      // C'est la première visite et aucun logo n'existe encore
-      setIsFirstVisit(true)
+      // Générer automatiquement les logos si aucun logo n'existe encore
+      generateLogos()
     }
 
     // Vérifier si le contenu existe déjà
@@ -69,18 +67,7 @@ export default function LogosPage() {
       )
       setContentExists(hasContent)
     }
-    
-    // Générer automatiquement les logos lors de la première visite
-    if (isFirstVisit && !sessionData.logos) {
-      // Utiliser setTimeout pour s'assurer que le composant est complètement monté
-      const timer = setTimeout(() => {
-        generateLogos()
-        setIsFirstVisit(false)
-      }, 500)
-      
-      return () => clearTimeout(timer)
-    }
-  }, [router, isFirstVisit])
+  }, [router])
 
   const handleDescriptionChange = (id: string, value: string) => {
     setLogoDescriptions(prev => ({
@@ -89,36 +76,47 @@ export default function LogosPage() {
     }))
   }
 
+  // Fonction pour uploader le logo vers le backend
+  const uploadLogoToBackend = async (variationId: string, base64Logo: string) => {
+    if (!sessionId) return;
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    try {
+      const response = await fetch(`${apiUrl}/api/upload-logo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          variation_id: variationId,
+          logo_base64: base64Logo
+        })
+      });
+      const data = await response.json();
+      if (data.logo_url) {
+        setLogos(prev => ({ ...prev, [variationId]: data.logo_url }));
+      }
+    } catch (err) {
+      setError("Erreur lors de l'enregistrement du logo côté serveur");
+    }
+  };
+
   const handleLogoUpload = (id: string, event: React.ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files || event.target.files.length === 0) return;
-    
     const file = event.target.files[0];
     if (!file.type.startsWith('image/')) {
       setError("Veuillez télécharger uniquement des fichiers image");
       return;
     }
-    
-    // Vérifier la taille du fichier (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
       setError("Le fichier est trop volumineux. Taille maximale: 5MB");
       return;
     }
-    
-    setIsGenerating(true); // Montrer un indicateur de chargement
-    
+    setIsGenerating(true);
     const reader = new FileReader();
     reader.onload = (e) => {
       if (e.target?.result) {
-        const newLogos = {...logos};
-        newLogos[id] = e.target.result as string;
-        setLogos(newLogos);
-        
-        // Mettre à jour la session
-        if (sessionId) {
-          const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}");
-          sessionData.logos = newLogos;
-          localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData));
-        }
+        const base64Logo = e.target.result as string;
+        setLogos(prev => ({ ...prev, [id]: base64Logo })); // immediate preview
+        uploadLogoToBackend(id, base64Logo); // persist to backend
         setIsGenerating(false);
       }
     };
@@ -173,7 +171,7 @@ export default function LogosPage() {
         sessionData.logoDescriptions = {};
       }
       sessionData.logoDescriptions[id] = randomPrompt;
-      localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData));
+      localStorage.setItem(`session_${sessionId}`, JSON.stringify(cleanSessionDataForStorage(sessionData)));
     }
   };
 
@@ -193,7 +191,8 @@ export default function LogosPage() {
         },
         body: JSON.stringify({
           variations: variations,
-          logo_descriptions: logoDescriptions
+          logo_descriptions: logoDescriptions,
+          session_id: sessionId
         }),
       })
 
@@ -215,7 +214,7 @@ export default function LogosPage() {
       const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}")
       sessionData.logos = newLogos
       sessionData.logoDescriptions = logoDescriptions
-      localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData))
+      localStorage.setItem(`session_${sessionId}`, JSON.stringify(cleanSessionDataForStorage(sessionData)))
     } catch (err) {
       setError(`Une erreur s'est produite: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
@@ -248,7 +247,8 @@ export default function LogosPage() {
           variations: [variation],
           logo_descriptions: {
             [id]: logoDescriptions[id]
-          }
+          },
+          session_id: sessionId
         }),
       })
 
@@ -270,7 +270,7 @@ export default function LogosPage() {
           sessionData.logos = {}
         }
         sessionData.logos[id] = data.logos[0].logo_url
-        localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData))
+        localStorage.setItem(`session_${sessionId}`, JSON.stringify(cleanSessionDataForStorage(sessionData)))
       }
     } catch (err) {
       setError(`Une erreur s'est produite: ${err instanceof Error ? err.message : String(err)}`)
@@ -308,7 +308,7 @@ export default function LogosPage() {
       // Sauvegarder la variation sélectionnée dans la session
       const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}");
       sessionData.selectedVariation = variationId;
-      localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData));
+      localStorage.setItem(`session_${sessionId}`, JSON.stringify(cleanSessionDataForStorage(sessionData)));
       
       console.log("Navigation vers /articles avec variationId:", variationId);
       
@@ -412,7 +412,7 @@ export default function LogosPage() {
           updatedSessionData.logos = sessionData.logos
         }
         
-        localStorage.setItem(`session_${sessionId}`, JSON.stringify(updatedSessionData))
+        localStorage.setItem(`session_${sessionId}`, JSON.stringify(cleanSessionDataForStorage(updatedSessionData)))
         
         // Attendre un court instant pour montrer le 100% avant de rediriger
         setTimeout(() => {
@@ -428,6 +428,36 @@ export default function LogosPage() {
       }
       setIsGeneratingAllContent(false)
     }
+  }
+
+  const handleRegenerateLogo = (index: number) => {
+    // Implement the logic to regenerate a logo
+  };
+
+  const handleDownloadLogo = (logo: string) => {
+    // Implement the logic to download a logo
+  };
+
+  // Utility to clean base64 images from sessionData before saving
+  function cleanSessionDataForStorage(sessionData: any) {
+    // Clean logos
+    if (sessionData.logos) {
+      Object.keys(sessionData.logos).forEach(key => {
+        if (typeof sessionData.logos[key] === 'string' && sessionData.logos[key].startsWith('data:image/')) {
+          // Remove or replace with a backend reference if available
+          delete sessionData.logos[key];
+        }
+      });
+    }
+    // Clean articles images if present
+    if (sessionData.articles && Array.isArray(sessionData.articles)) {
+      sessionData.articles.forEach((article: any) => {
+        if (article.image && typeof article.image === 'string' && article.image.startsWith('data:image/')) {
+          delete article.image;
+        }
+      });
+    }
+    return sessionData;
   }
 
   return (
@@ -509,40 +539,47 @@ export default function LogosPage() {
                     <div>
                       <label className="block text-sm font-medium mb-2">Aperçu du logo</label>
                       {logos[variation.id] ? (
-                        <div className="relative bg-white dark:bg-slate-700 rounded-lg p-4 flex items-center justify-center h-[150px]">
-                          <img 
-                            src={logos[variation.id]} 
-                            alt={`Logo pour ${variation.title}`} 
-                            className="max-h-full max-w-full object-contain"
-                          />
-                          <div className="absolute top-2 right-2 flex gap-2">
+                        <div className="relative group">
+                          <div className="aspect-square bg-slate-100 dark:bg-slate-800 rounded-lg overflow-hidden">
+                            <img
+                              src={logos[variation.id]}
+                              alt={`Logo pour ${variation.title}`}
+                              className="w-full h-full object-contain p-4 transition-transform duration-300 group-hover:scale-105"
+                            />
+                          </div>
+                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-2">
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={() => generateSingleLogo(variation.id)}
                               disabled={isGeneratingLogo[variation.id]}
+                              className="bg-white/90 hover:bg-white"
                             >
                               {isGeneratingLogo[variation.id] ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Génération...
+                                </>
                               ) : (
-                                <RefreshCw className="h-4 w-4" />
+                                <>
+                                  <RefreshCw className="mr-2 h-4 w-4" />
+                                  Régénérer
+                                </>
                               )}
                             </Button>
-                            
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => document.getElementById(`logo-upload-${variation.id}`)?.click()}
-                            >
-                              <ImageIcon className="h-4 w-4" />
-                            </Button>
-                            <input
-                              id={`logo-upload-${variation.id}`}
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => handleLogoUpload(variation.id, e)}
-                            />
+                            <label htmlFor={`logo-upload-${variation.id}`} className="cursor-pointer">
+                              <div className="flex items-center gap-1 text-sm px-3 py-1 bg-white/90 hover:bg-white rounded-md transition-colors">
+                                <Upload className="h-4 w-4" />
+                                Importer
+                              </div>
+                              <input
+                                id={`logo-upload-${variation.id}`}
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => handleLogoUpload(variation.id, e)}
+                              />
+                            </label>
                           </div>
                         </div>
                       ) : (
@@ -554,7 +591,7 @@ export default function LogosPage() {
                             {isGeneratingLogo[variation.id] ? (
                               <>
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Génération...
+                                Générer un logo
                               </>
                             ) : (
                               <>
@@ -644,6 +681,17 @@ export default function LogosPage() {
           </CardFooter>
         </Card>
       </div>
+      {isGenerating && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-lg flex flex-col items-center gap-4">
+            <Loader2 className="h-12 w-12 animate-spin text-primary" />
+            <p className="text-lg font-medium">Génération des logos en cours...</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Cela peut prendre quelques instants
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 } 

@@ -1,0 +1,30 @@
+{
+  "logos": {},
+  "variations": [
+    {
+      "id": "var1",
+      "title": "Maman Connectée",
+      "description": "Un site web pour les mamans modernes qui veulent rester connectées et organisées dans leur vie quotidienne.",
+      "style": "Moderne, épuré, avec des tons de bleu et de gris pour symboliser la technologie."
+    },
+    {
+      "id": "var2",
+      "title": "Maman Nature",
+      "description": "Un site web axé sur le bien-être des mamans à travers une approche naturelle et écologique.",
+      "style": "Organique, avec des couleurs terreuses et des éléments de feuillage pour une ambiance apaisante."
+    },
+    {
+      "id": "var3",
+      "title": "Maman Créative",
+      "description": "Un site web pour les mamans artistiques et créatives qui veulent partager leurs projets et inspirations.",
+      "style": "Coloré, ludique, avec des motifs et des illustrations originales pour stimuler la créativité."
+    },
+    {
+      "id": "var4",
+      "title": "Maman en Forme",
+      "description": "Un site web dédié aux mamans soucieuses de leur santé et de leur forme physique.",
+      "style": "Dynamique, énergique, avec des images de sport et des couleurs vives pour inspirer le mouvement."
+    }
+  ],
+  "articles": []
+}

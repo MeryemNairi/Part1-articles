@@ -4,9 +4,9 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardFooter } from "@/components/ui/card"
-import { Loader2, ArrowLeft, FileText, RefreshCw } from "lucide-react"
+import { Loader2, ArrowLeft, FileText, RefreshCw, Download, ImageIcon } from "lucide-react"
 import Link from "next/link"
-import { toast } from "@/components/ui/use-toast"
+import { useToast } from "@/components/ui/toast"
 
 // Définir une interface pour l'article
 interface Article {
@@ -17,6 +17,7 @@ interface Article {
 
 export default function ContentPage() {
   const router = useRouter()
+  const { toast } = useToast();
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [variations, setVariations] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -24,6 +25,8 @@ export default function ContentPage() {
   const [isRegeneratingContent, setIsRegeneratingContent] = useState<Record<string, boolean>>({})
   const [regenerationProgress, setRegenerationProgress] = useState<Record<string, number>>({})
   const [isExporting, setIsExporting] = useState<string | null>(null)
+  const [contentImage, setContentImage] = useState<string | null>(null)
+  const [isGeneratingImage, setIsGeneratingImage] = useState<boolean>(false)
 
   useEffect(() => {
     // Récupérer l'ID de la session actuelle
@@ -45,23 +48,36 @@ export default function ContentPage() {
     console.log("Données de session chargées:", sessionData)
     
     setSessionId(currentSessionId)
-    
-    // Récupérer les logos s'ils existent
-    if (sessionData.logos) {
-      // Mettre à jour les variations avec les logos
-      const variationsWithLogos = sessionData.variations.map((variation: any, index: number) => {
-        return {
+    setIsLoading(true)
+    // Fetch logos from backend
+    const fetchLogos = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const res = await fetch(`${apiUrl}/api/get-logos?session_id=${currentSessionId}`);
+        const data = await res.json();
+        const backendLogos = data.logos || {};
+        // Merge logos into variations
+        const variationsWithLogos = sessionData.variations.map((variation: any) => ({
           ...variation,
-          logo: sessionData.logos[variation.id] || null
+          logo: backendLogos[variation.id] || null
+        }));
+        setVariations(variationsWithLogos);
+      } catch (e) {
+        // fallback: use local logos if backend fails
+        if (sessionData.logos) {
+          const variationsWithLogos = sessionData.variations.map((variation: any) => ({
+            ...variation,
+            logo: sessionData.logos[variation.id] || null
+          }));
+          setVariations(variationsWithLogos);
+        } else {
+          setVariations(sessionData.variations);
         }
-      })
-      
-      setVariations(variationsWithLogos)
-    } else {
-      setVariations(sessionData.variations)
-    }
-    
-    setIsLoading(false)
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchLogos();
   }, [router])
 
   const navigateToArticle = (variationIndex: number, articleIndex: number) => {
@@ -252,14 +268,14 @@ export default function ContentPage() {
       
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       
-      const response = await fetch(`${apiUrl}/api/export-wordpress-template`, {
+      const response = await fetch(`${apiUrl}/api/publish-to-wordpress`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          variation_id: variationId,
-          variation_data: variation
+          variation_data: variation,
+          session_id: sessionId
         }),
       });
       
@@ -267,23 +283,63 @@ export default function ContentPage() {
         throw new Error(`Erreur: ${response.status}`);
       }
       
-      // Télécharger le fichier
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${variation.title}_export.xml`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      const result = await response.json();
+      
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      
+      // Rediriger vers le site WordPress
+      window.open('https://aic-builder.cloud-glory-creation.com/', '_blank');
+      toast({ title: "Succès", children: "Articles publiés avec succès !" });
       
     } catch (err) {
-      console.error("Erreur lors de l'exportation:", err);
-      toast.error("Impossible d'exporter le template WordPress");
+      console.error("Erreur lors de la publication:", err);
+      toast({ title: "Erreur", children: "Impossible de publier les articles", variant: "destructive" });
     } finally {
       setIsExporting("");
     }
+  };
+
+  const generateContentImage = async () => {
+    if (!sessionId) return;
+    
+    setIsGeneratingImage(true);
+    
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    
+    try {
+      const response = await fetch(`${apiUrl}/api/generate-content-image`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: sessionId
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Erreur: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      
+      setContentImage(data.image_url);
+    } catch (err) {
+      console.error("Erreur lors de la génération de l'image:", err);
+      toast({ title: "Erreur", children: "Impossible de générer l'image", variant: "destructive" });
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  };
+
+  const handleDownloadImage = (imageUrl: string) => {
+    // Implementation of handleDownloadImage function
   };
 
   if (isLoading) {
@@ -441,7 +497,76 @@ export default function ContentPage() {
             </Card>
           ))}
         </div>
+
+        {contentImage ? (
+          <div className="relative group">
+            <div className="aspect-video bg-slate-100 dark:bg-slate-800 rounded-lg overflow-hidden">
+              <img
+                src={contentImage}
+                alt="Image de contenu"
+                className="w-full h-full object-contain p-4 transition-transform duration-300 group-hover:scale-105"
+              />
+            </div>
+            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={generateContentImage}
+                disabled={isGeneratingImage}
+                className="bg-white/90 hover:bg-white"
+              >
+                {isGeneratingImage ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Génération...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Régénérer
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleDownloadImage(contentImage)}
+                className="bg-white/90 hover:bg-white"
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Télécharger
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 min-h-[200px] bg-slate-100 dark:bg-slate-800 rounded-lg p-4">
+            {isGeneratingImage ? (
+              <>
+                <Loader2 className="h-12 w-12 mb-2 animate-spin" />
+                <span>Génération de l'image en cours...</span>
+              </>
+            ) : (
+              <>
+                <ImageIcon className="h-12 w-12 mb-2" />
+                <span>Aucune image</span>
+                <span className="text-sm">Générer une image pour votre contenu</span>
+              </>
+            )}
+          </div>
+        )}
       </div>
+
+      {isGeneratingImage && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-lg flex flex-col items-center gap-4">
+            <Loader2 className="h-12 w-12 animate-spin text-primary" />
+            <p className="text-lg font-medium">Génération de l'image en cours...</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Cela peut prendre quelques instants
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 } 

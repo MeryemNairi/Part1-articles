@@ -1,0 +1,30 @@
+{
+  "logos": {},
+  "variations": [
+    {
+      "id": "var1",
+      "title": "Vie Saine",
+      "description": "Découvrez des conseils et astuces pour mener une vie saine et équilibrée.",
+      "style": "Minimaliste, avec des couleurs apaisantes et des images de nature"
+    },
+    {
+      "id": "var2",
+      "title": "Santé et Bien-être",
+      "description": "Explorez des articles sur la santé mentale, la nutrition et le fitness pour une vie épanouie.",
+      "style": "Moderne et dynamique, avec des illustrations ludiques"
+    },
+    {
+      "id": "var3",
+      "title": "Médecine Alternative",
+      "description": "Plongez dans l'univers des médecines douces et alternatives pour prendre soin de votre corps autrement.",
+      "style": "Chaleureux et naturel, avec des tons terreux et des motifs organiques"
+    },
+    {
+      "id": "var4",
+      "title": "Santé au Travail",
+      "description": "Trouvez des conseils pour rester en forme et en bonne santé tout en travaillant.",
+      "style": "Professionnel et épuré, avec des images de bureau et de personnes au travail"
+    }
+  ],
+  "articles": []
+}

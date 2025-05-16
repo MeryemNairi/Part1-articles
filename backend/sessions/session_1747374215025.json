@@ -1,0 +1,24 @@
+{
+  "logos": {},
+  "variations": [
+    {
+      "id": "var1",
+      "title": "Edu-Health AI Hub",
+      "description": "Plateforme intégrant l'intelligence artificielle pour l'éducation et la santé, offrant des solutions personnalisées et innovantes.",
+      "style": "Moderne, épuré, avec des couleurs vives pour inspirer la créativité et la vitalité."
+    },
+    {
+      "id": "var2",
+      "title": "AI Learning & Wellness Center",
+      "description": "Centre d'apprentissage et de bien-être utilisant l'intelligence artificielle pour améliorer les résultats scolaires et la santé des individus.",
+      "style": "Design minimaliste et apaisant, avec des tons naturels pour une ambiance relaxante et inspirante."
+    },
+    {
+      "id": "var3",
+      "title": "Future of Education & Health AI",
+      "description": "Exploration des avancées de l'intelligence artificielle dans les domaines de l'éducation et de la santé, avec des perspectives sur l'avenir.",
+      "style": "Futuriste, avec des éléments graphiques innovants et des couleurs vives pour représenter la technologie de pointe."
+    }
+  ],
+  "articles": []
+}

@@ -73,41 +73,53 @@ export default function ArticleDetailPage() {
     
     const articleIndex = Number(id)
     
-    // Vérifier si l'article spécifique existe
     if (!sessionData.articles[articleIndex]) {
-      console.log(`Article avec ID ${articleIndex} non trouvé, redirection vers la page de contenu`)
-      router.push("/content")
+      console.log(`Article avec l'index ${articleIndex} non trouvé, redirection vers la page d'articles`)
+      router.push("/articles")
       return
     }
     
-    console.log(`Article trouvé: ${sessionData.articles[articleIndex].title}`)
-    
     setSessionId(currentSessionId)
-    setTitle(sessionData.articles[articleIndex].title)
-    setContent(sessionData.articles[articleIndex].content)
-    setEditedContent(sessionData.articles[articleIndex].content)
-    setIsLoading(false)
+    setTitle(sessionData.articles[articleIndex].title || "")
+    setContent(sessionData.articles[articleIndex].content || "")
+    setEditedContent(sessionData.articles[articleIndex].content || "")
+    setIsValidated(sessionData.articles[articleIndex].isValidated || false)
+    
+    // Récupérer l'image de l'article si elle existe
+    if (sessionData.articles[articleIndex].image) {
+      setArticleImage(sessionData.articles[articleIndex].image)
+      console.log("Image d'article chargée:", sessionData.articles[articleIndex].image)
+    }
     
     // Récupérer les sources si elles existent
     if (sessionData.articles[articleIndex].sources) {
       setSources(sessionData.articles[articleIndex].sources)
     }
     
-    // Récupérer l'image de l'article si elle existe
-    if (sessionData.articles[articleIndex].image) {
-      setArticleImage(sessionData.articles[articleIndex].image)
-    } else {
-      // Générer automatiquement une image si aucune n'existe
-      setTimeout(() => {
-        generateArticleImage()
-      }, 500)
+    // Récupérer les informations de la session
+    if (sessionData.topic) {
+      setTopic(sessionData.topic)
     }
+    
+    if (sessionData.tone) {
+      setTone(sessionData.tone)
+    }
+    
+    if (sessionData.additionalContext) {
+      setAdditionalContext(sessionData.additionalContext)
+    }
+    
+    if (sessionData.avoidContext) {
+      setAvoidContext(sessionData.avoidContext)
+    }
+    
+    setIsLoading(false)
   }, [id, router])
 
   const generateArticleImage = async () => {
     if (!sessionId || !title) return
-    
     setIsGeneratingImage(true)
+    setError(null)
     
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
     
@@ -116,6 +128,9 @@ export default function ArticleDetailPage() {
       const defaultPrompt = `Illustration pour un article intitulé "${title}"`
       const prompt = imagePrompt || defaultPrompt
       
+      console.log("Envoi de la requête pour générer une image avec le prompt:", prompt)
+      
+      // Envoyer aussi sessionId et articleIndex pour la persistance côté backend
       const response = await fetch(`${apiUrl}/api/generate-article-image`, {
         method: 'POST',
         headers: {
@@ -123,40 +138,64 @@ export default function ArticleDetailPage() {
         },
         body: JSON.stringify({
           prompt: prompt,
-          title: title
+          title: title,
+          session_id: sessionId,
+          article_index: id
         }),
       })
       
+      console.log("Statut de la réponse:", response.status)
+      
       if (!response.ok) {
+        const errorText = await response.text()
+        console.error("Erreur de l'API:", errorText)
         throw new Error(`Erreur: ${response.status}`)
       }
       
-      const data = await response.json()
+      // Convertir la réponse en texte d'abord pour le débogage
+      const responseText = await response.text()
+      console.log("Réponse brute:", responseText.substring(0, 100) + "...")
       
-      if (data.error) {
-        throw new Error(data.error)
-      }
+      // Puis parser en JSON
+      const data = JSON.parse(responseText)
       
-      // Mettre à jour l'image de l'article
-      if (data.imageUrl) {
-        setArticleImage(data.imageUrl)
+      // Vérifier si l'image a été générée avec succès
+      if (data.image_url) {
+        console.log("Image URL reçue, longueur:", data.image_url.length)
+        setArticleImage(data.image_url)
         
         // Mettre à jour la session
-        const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}")
-        
-        if (!sessionData.articles) {
-          sessionData.articles = []
-        }
-        
-        const articleIndex = Number(id)
-        
-        if (sessionData.articles[articleIndex]) {
-          sessionData.articles[articleIndex].image = data.imageUrl
+        if (sessionId) {
+          const sessionData = JSON.parse(localStorage.getItem(`session_${sessionId}`) || "{}")
+          
+          if (!sessionData.articles) {
+            sessionData.articles = []
+          }
+          
+          const articleIndex = Number(id)
+          
+          if (!sessionData.articles[articleIndex]) {
+            sessionData.articles[articleIndex] = {
+              title: title,
+              content: content,
+              isValidated: isValidated
+            }
+          }
+          
+          sessionData.articles[articleIndex].image = data.image_url
           localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData))
+          console.log("Image sauvegardée dans la session")
         }
+      } else if (data.error) {
+        console.error("Erreur retournée par l'API:", data.error)
+        setError(data.error)
+      } else {
+        console.error("Pas d'URL d'image dans la réponse")
+        setError("Pas d'URL d'image dans la réponse")
       }
     } catch (err) {
       console.error("Erreur lors de la génération de l'image:", err)
+      setError(`Erreur lors de la génération de l'image: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setIsGeneratingImage(false)
     }
@@ -565,38 +604,21 @@ export default function ArticleDetailPage() {
                       </div>
                     </div>
                     
-                    <div className="space-y-2">
-                      <label className="text-sm text-slate-500 dark:text-slate-400">Prompt pour l'image</label>
-                      <div className="flex gap-2">
-                        <Input
-                          value={imagePrompt}
-                          onChange={(e) => setImagePrompt(e.target.value)}
-                          placeholder={`Illustration pour un article intitulé "${title}"`}
-                          className="flex-1"
-                        />
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={generateArticleImage}
-                          disabled={isGeneratingImage}
-                        >
-                          Générer
-                        </Button>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-4 flex items-center justify-center min-h-[200px]">
+                    <div className="aspect-video rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800">
                       {articleImage ? (
-                        <img
-                          src={articleImage}
-                          alt={`Image pour ${title}`}
-                          className="max-h-[300px] max-w-full object-contain rounded-md"
+                        <img 
+                          src={articleImage} 
+                          alt={title} 
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            console.error("Erreur de chargement de l'image:", e)
+                            e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpolyline points='21 15 16 10 5 21'/%3E%3C/svg%3E"
+                            e.currentTarget.className = "w-full h-full object-contain p-8 opacity-30"
+                          }}
                         />
                       ) : (
-                        <div className="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500">
-                          <ImageIcon className="h-12 w-12 mb-2" />
-                          <span>Aucune image</span>
-                          <span className="text-sm">Télécharger une image</span>
+                        <div className="w-full h-full flex items-center justify-center">
+                          <ImageIcon className="h-12 w-12 text-slate-400" />
                         </div>
                       )}
                     </div>

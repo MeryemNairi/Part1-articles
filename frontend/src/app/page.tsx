@@ -130,6 +130,26 @@ export default function HomePage() {
     }
   }, []);
 
+  function cleanSessionDataForStorage(sessionData: any) {
+    // Clean logos
+    if (sessionData.logos) {
+      Object.keys(sessionData.logos).forEach(key => {
+        if (typeof sessionData.logos[key] === 'string' && sessionData.logos[key].startsWith('data:image/')) {
+          delete sessionData.logos[key];
+        }
+      });
+    }
+    // Clean articles images if present
+    if (sessionData.articles && Array.isArray(sessionData.articles)) {
+      sessionData.articles.forEach((article: any) => {
+        if (article.image && typeof article.image === 'string' && article.image.startsWith('data:image/')) {
+          delete article.image;
+        }
+      });
+    }
+    return sessionData;
+  }
+
   const generateWebsiteThemes = async () => {
     if (!theme) return
 
@@ -174,9 +194,21 @@ export default function HomePage() {
         createdAt: new Date().toISOString()
       }
       
+      // Créer la session côté backend
+      try {
+        await fetch(`${apiUrl}/api/create-session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: sessionId,
+            variations: data.variations
+          })
+        });
+      } catch (e) {
+        // Optionally handle backend session creation error
+      }
       localStorage.setItem("currentSession", sessionId)
-      localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionData))
-      
+      localStorage.setItem(`session_${sessionId}`, JSON.stringify(cleanSessionDataForStorage(sessionData)))
       router.push("/logos")
     } catch (err) {
       setError(`Une erreur s'est produite: ${err instanceof Error ? err.message : String(err)}`)
